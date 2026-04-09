@@ -6,8 +6,9 @@ from ..milvus.config import IndexType, MilvusIndexConfig
 
 class ZillizCloudConfig(DBConfig):
     uri: SecretStr
-    user: str
-    password: SecretStr
+    user: str = ""
+    password: SecretStr = SecretStr("")
+    token: SecretStr = SecretStr("")
     num_shards: int = 1
     collection_name: str = "ZillizCloudVDBBench"
 
@@ -16,6 +17,7 @@ class ZillizCloudConfig(DBConfig):
             "uri": self.uri.get_secret_value(),
             "user": self.user,
             "password": self.password.get_secret_value(),
+            "token": self.token.get_secret_value(),
             "num_shards": self.num_shards,
             "collection_name": self.collection_name,
         }

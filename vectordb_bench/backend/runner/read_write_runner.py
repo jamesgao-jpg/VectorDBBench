@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 
 class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunner):
+
     def __init__(
         self,
         db: api.VectorDB,
@@ -106,7 +107,11 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
         log.info(
             f"Search after wirte - Conc search start, dur for each conc={self.read_dur_after_write}",
         )
+        _saved_ssr, self.serial_search_runner = self.serial_search_runner, None
+        _saved_ds, self.dataset = self.dataset, None
         result = self.run_by_dur(self.read_dur_after_write)
+        self.serial_search_runner = _saved_ssr
+        self.dataset = _saved_ds
         max_qps = result[0]
         conc_failed_rate = result[1]
         conc_num_list = result[2]
@@ -278,7 +283,14 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
                         f"[{target_batch}/{total_batch}] Concurrent search - {perc}% start, "
                         f"dur={each_conc_search_dur:.4f}"
                     )
+                    # Temporarily clear heavy attrs to reduce pickle size for concurrent workers.
+                    # At this point we're in the search subprocess — dataset belongs to
+                    # the insert subprocess (its own copy), and serial search is done.
+                    _saved_ssr, self.serial_search_runner = self.serial_search_runner, None
+                    _saved_ds, self.dataset = self.dataset, None
                     conc_result = self.run_by_dur(each_conc_search_dur)
+                    self.serial_search_runner = _saved_ssr
+                    self.dataset = _saved_ds
                     max_qps = conc_result[0]
                     conc_failed_rate = conc_result[1]
                     conc_num_list = conc_result[2]

@@ -55,6 +55,7 @@ class Milvus(VectorDB):
             uri=self.db_config.get("uri"),
             user=self.db_config.get("user"),
             password=self.db_config.get("password"),
+            token=self.db_config.get("token", ""),
             timeout=30,
         )
 
@@ -131,6 +132,7 @@ class Milvus(VectorDB):
             uri=self.db_config.get("uri"),
             user=self.db_config.get("user"),
             password=self.db_config.get("password"),
+            token=self.db_config.get("token", ""),
             timeout=60,
         )
         yield

@@ -1,6 +1,7 @@
 """Wrapper around the TurboPuffer vector database over VectorDB"""
 
 import logging
+import os
 import time
 from contextlib import contextmanager
 
@@ -12,6 +13,25 @@ from vectordb_bench.backend.filter import Filter, FilterOp
 from ..api import VectorDB
 
 log = logging.getLogger(__name__)
+
+# Env-var controlled per-stage timing for diagnosing backpressure / indexer behavior.
+# Set STAGE_ROWS=200000 to log a line every 200k rows inserted.
+STAGE_ROWS = int(os.environ.get("STAGE_ROWS", "0"))
+
+# Set DISABLE_BACKPRESSURE=1 to pass disable_backpressure=True on every write,
+# recommended by turbopuffer for bulk loads (avoids 429 stalls above 2 GiB unindexed).
+# Tradeoff: strongly consistent queries fail above the threshold during the load.
+DISABLE_BACKPRESSURE = os.environ.get("DISABLE_BACKPRESSURE", "0") == "1"
+
+# Set TPUF_MAX_RETRIES=0 to disable SDK auto-retry of 429s; any RateLimitError
+# will surface as an exception (caught by our handler and logged) instead of
+# being silently retried with backoff. Useful for verifying backpressure hits.
+TPUF_MAX_RETRIES = os.environ.get("TPUF_MAX_RETRIES")
+
+# Set TPUF_EVENTUAL_CONSISTENCY=1 to pass consistency={"level":"eventual"} on
+# every query. Avoids 429s on reads when the namespace has a large unindexed
+# backlog, at the cost of only seeing indexed data + first 128 MiB of unindexed.
+TPUF_EVENTUAL_CONSISTENCY = os.environ.get("TPUF_EVENTUAL_CONSISTENCY", "0") == "1"
 
 
 class TurboPuffer(VectorDB):
@@ -43,6 +63,12 @@ class TurboPuffer(VectorDB):
 
         self.with_scalar_labels = with_scalar_labels
 
+        # Per-stage insertion timing state (active only when STAGE_ROWS > 0).
+        self._stage_rows = STAGE_ROWS
+        self._stage_total = 0
+        self._stage_start_time = None
+        self._stage_idx = 0
+
         if drop_old:
             log.info(f"Drop old. delete the namespace: {self.namespace}")
             tmp_client = self._create_client()
@@ -57,6 +83,8 @@ class TurboPuffer(VectorDB):
         client_kwargs = {"api_key": self.api_key, "region": self.region}
         if self.api_base_url:
             client_kwargs["base_url"] = self.api_base_url
+        if TPUF_MAX_RETRIES is not None:
+            client_kwargs["max_retries"] = int(TPUF_MAX_RETRIES)
         return tpuf.Turbopuffer(**client_kwargs)
 
     @contextmanager
@@ -82,6 +110,9 @@ class TurboPuffer(VectorDB):
         **kwargs,
     ) -> tuple[int, Exception]:
         try:
+            write_kwargs = {"distance_metric": self.metric}
+            if DISABLE_BACKPRESSURE:
+                write_kwargs["disable_backpressure"] = True
             if self.with_scalar_labels:
                 self.ns.write(
                     upsert_columns={
@@ -89,7 +120,7 @@ class TurboPuffer(VectorDB):
                         self._vector_field: embeddings,
                         self._scalar_label_field: labels_data,
                     },
-                    distance_metric=self.metric,
+                    **write_kwargs,
                 )
             else:
                 self.ns.write(
@@ -97,10 +128,33 @@ class TurboPuffer(VectorDB):
                         self._scalar_id_field: metadata,
                         self._vector_field: embeddings,
                     },
-                    distance_metric=self.metric,
+                    **write_kwargs,
                 )
+        except tpuf.RateLimitError as e:
+            log.warning(f"429 RateLimitError on insert (rows={len(embeddings)}): {e}")
+        except tpuf.APIStatusError as e:
+            status = getattr(e, "status_code", None)
+            log.warning(f"APIStatusError status={status} on insert (rows={len(embeddings)}): {e}")
         except Exception as e:
             log.warning(f"Failed to insert. Error: {e}")
+
+        # Per-stage timing: log a stage summary line each time cumulative row count
+        # crosses a multiple of STAGE_ROWS.
+        if self._stage_rows > 0:
+            now = time.perf_counter()
+            if self._stage_start_time is None:
+                self._stage_start_time = now
+            self._stage_total += len(embeddings)
+            if self._stage_total >= (self._stage_idx + 1) * self._stage_rows:
+                dur = now - self._stage_start_time
+                rate = (self._stage_total - self._stage_idx * self._stage_rows) / dur if dur > 0 else 0.0
+                log.info(
+                    f"STAGE {self._stage_idx + 1}: rows={self._stage_total} "
+                    f"stage_dur={dur:.2f}s stage_rate={rate:.1f} rows/s"
+                )
+                self._stage_idx += 1
+                self._stage_start_time = now
+
         return len(embeddings), None
 
     def search_embedding(
@@ -109,11 +163,14 @@ class TurboPuffer(VectorDB):
         k: int = 100,
         timeout: int | None = None,
     ) -> list[int]:
-        res = self.ns.query(
-            rank_by=("vector", "ANN", query),
-            top_k=k,
-            filters=self.expr,
-        )
+        query_kwargs = {
+            "rank_by": ("vector", "ANN", query),
+            "top_k": k,
+            "filters": self.expr,
+        }
+        if TPUF_EVENTUAL_CONSISTENCY:
+            query_kwargs["consistency"] = {"level": "eventual"}
+        res = self.ns.query(**query_kwargs)
         return [int(row.id) for row in res.rows] if res.rows is not None else []
 
     def prepare_filter(self, filters: Filter):

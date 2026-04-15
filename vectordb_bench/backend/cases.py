@@ -432,10 +432,10 @@ class StreamingPerformanceCase(Case):
 
     def __init__(
         self,
-        dataset_with_size_type: DatasetWithSizeType | str = DatasetWithSizeType.CohereSmall.value,
-        insert_rate: int = 500,
-        search_stages: list[float] | str = (0.5, 0.8),
-        concurrencies: list[int] | str = (5, 10),
+        dataset_with_size_type: DatasetWithSizeType | str = DatasetWithSizeType.CohereLarge.value,
+        insert_rate: int = 50000,
+        search_stages: list[float] | str = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+        concurrencies: list[int] | str = (30,),
         **kwargs,
     ):
         num_per_batch = config.NUM_PER_BATCH

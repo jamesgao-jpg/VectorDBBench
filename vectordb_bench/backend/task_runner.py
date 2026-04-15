@@ -1,11 +1,14 @@
 import concurrent
 import hashlib
 import logging
+import pathlib
 import re
 import traceback
 from enum import Enum, auto
 
 import numpy as np
+
+from vectordb_bench import config
 
 from ..base import BaseModel
 from ..metric import Metric
@@ -194,20 +197,19 @@ class CaseRunner(BaseModel):
         log.info("Start performance case")
         try:
             m = Metric()
-            if drop_old:
-                if TaskStage.LOAD in self.config.stages:
-                    _, load_dur = self._load_train_data()
-                    build_dur = self._optimize()
-                    m.insert_duration = round(load_dur, 4)
-                    m.optimize_duration = round(build_dur, 4)
-                    m.load_duration = round(load_dur + build_dur, 4)
-                    log.info(
-                        f"Finish loading the entire dataset into VectorDB,"
-                        f" insert_duration={load_dur}, optimize_duration={build_dur}"
-                        f" load_duration(insert + optimize) = {m.load_duration}"
-                    )
-                else:
-                    log.info("Data loading skipped")
+            if TaskStage.LOAD in self.config.stages:
+                _, load_dur = self._load_train_data()
+                build_dur = self._optimize()
+                m.insert_duration = round(load_dur, 4)
+                m.optimize_duration = round(build_dur, 4)
+                m.load_duration = round(load_dur + build_dur, 4)
+                log.info(
+                    f"Finish loading the entire dataset into VectorDB,"
+                    f" insert_duration={load_dur}, optimize_duration={build_dur}"
+                    f" load_duration(insert + optimize) = {m.load_duration}"
+                )
+            else:
+                log.info("Data loading skipped")
             if TaskStage.SEARCH_SERIAL in self.config.stages or TaskStage.SEARCH_CONCURRENT in self.config.stages:
                 self._init_search_runner()
                 if TaskStage.SEARCH_CONCURRENT in self.config.stages:
@@ -249,6 +251,10 @@ class CaseRunner(BaseModel):
     def _load_train_data(self):
         """Insert train data concurrently and get the insert_duration"""
         try:
+            collection_name = getattr(self.db, "collection_name", "default")
+            checkpoint_path = pathlib.Path(
+                config.DATASET_LOCAL_DIR, "checkpoints", f"{collection_name}.ckpt"
+            )
             runner = ConcurrentInsertRunner(
                 self.db,
                 self.ca.dataset,
@@ -256,6 +262,7 @@ class CaseRunner(BaseModel):
                 self.ca.filters,
                 self.ca.load_timeout,
                 max_workers=self.config.load_concurrency or None,
+                checkpoint_path=checkpoint_path,
             )
             runner.run()
         except Exception as e:

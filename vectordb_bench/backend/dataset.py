@@ -399,11 +399,14 @@ class DatasetManager(BaseModel):
 
 
 class DataSetIterator:
-    def __init__(self, dataset: DatasetManager):
+    def __init__(self, dataset: DatasetManager, start_idx: int = 0):
         self._ds = dataset
-        self._idx = 0  # file number
+        self._idx = start_idx  # file number
         self._cur = None
         self._sub_idx = [0 for i in range(len(self._ds.train_files))]  # iter num for each file
+        if start_idx > 0:
+            log.info(f"DataSetIterator: skipping to file index {start_idx} "
+                     f"(skipped {start_idx} of {len(self._ds.train_files)} files)")
 
     def __getstate__(self):
         """Custom pickle support to handle unpicklable generator."""
@@ -481,6 +484,7 @@ class DatasetWithSizeType(Enum):
     OpenAISmall = "Small OpenAI (1536dim, 50K)"
     OpenAIMedium = "Medium OpenAI (1536dim, 500K)"
     OpenAILarge = "Large OpenAI (1536dim, 5M)"
+    LAION100M = "Large LAION (768dim, 100M)"
 
     def get_manager(self) -> DatasetManager:
         if self not in DatasetWithSizeMap:
@@ -517,4 +521,5 @@ DatasetWithSizeMap = {
     DatasetWithSizeType.OpenAISmall: Dataset.OPENAI.manager(50_000),
     DatasetWithSizeType.OpenAIMedium: Dataset.OPENAI.manager(500_000),
     DatasetWithSizeType.OpenAILarge: Dataset.OPENAI.manager(5_000_000),
+    DatasetWithSizeType.LAION100M: Dataset.LAION.manager(100_000_000),
 }

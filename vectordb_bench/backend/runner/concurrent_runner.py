@@ -12,6 +12,7 @@ import concurrent.futures
 import logging
 import multiprocessing as mp
 import threading
+import pathlib
 import time
 from copy import deepcopy
 from enum import StrEnum
@@ -65,6 +66,7 @@ class ConcurrentInsertRunner:
         timeout: float | None = None,
         max_workers: int | None = None,
         backend: ExecutorBackend = ExecutorBackend.THREADING,
+        checkpoint_path: pathlib.Path | None = None,
     ):
         self.timeout = timeout if isinstance(timeout, int | float) else None
         self.dataset: DatasetManager = dataset
@@ -72,6 +74,7 @@ class ConcurrentInsertRunner:
         self.normalize = normalize
         self.filters = filters
         self.backend = backend
+        self.checkpoint_path = checkpoint_path
 
         effective_workers = max_workers or mp.cpu_count()
         if not db.thread_safe:
@@ -171,6 +174,21 @@ class ConcurrentInsertRunner:
         db = self._get_thread_db()
         return self._insert_batch_with_retry(db, embeddings, metadata, labels_data)
 
+    def _read_checkpoint(self) -> int:
+        """Read the last completed file index from checkpoint. Returns 0 if none."""
+        if self.checkpoint_path and self.checkpoint_path.exists():
+            val = int(self.checkpoint_path.read_text().strip())
+            log.info(f"Checkpoint found: {val} files completed, resuming from file {val}")
+            return val
+        return 0
+
+    def _write_checkpoint(self, file_idx: int):
+        """Write the number of completed files to checkpoint."""
+        if self.checkpoint_path:
+            self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            self.checkpoint_path.write_text(str(file_idx))
+            log.info(f"Checkpoint updated: {file_idx} files completed")
+
     def _next_batch(self) -> tuple[list[list[float]], list[int], list[str] | None] | None:
         """Pull the next batch from the shared dataset iterator.
 
@@ -178,10 +196,17 @@ class ConcurrentInsertRunner:
         Returns None when the iterator is exhausted.
         """
         with self._iter_lock:
+            prev_idx = self._dataset_iter._idx
             try:
                 data_df = next(self._dataset_iter)
             except StopIteration:
+                # Final file just finished
+                self._write_checkpoint(prev_idx + 1)
                 return None
+            cur_idx = self._dataset_iter._idx
+            if cur_idx > prev_idx:
+                # Moved to next file — previous file is fully consumed
+                self._write_checkpoint(cur_idx)
 
         all_metadata = data_df[self.dataset.data.train_id_field].tolist()
         emb_np = np.stack(data_df[self.dataset.data.train_vector_field])
@@ -218,7 +243,9 @@ class ConcurrentInsertRunner:
         self._ctx_lock = threading.Lock()
         self._thread_contexts = []
         self._iter_lock = threading.Lock()
-        self._dataset_iter = iter(self.dataset)
+        start_idx = self._read_checkpoint()
+        from vectordb_bench.backend.dataset import DataSetIterator
+        self._dataset_iter = DataSetIterator(self.dataset, start_idx=start_idx)
 
         with self.db.init():
             log.info(

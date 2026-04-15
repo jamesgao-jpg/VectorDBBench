@@ -133,8 +133,6 @@ def parse_task_stages(
     search_concurrent: bool,
 ) -> list[TaskStage]:
     stages = []
-    if load and not drop_old:
-        raise RuntimeError("Dropping old data cannot be skipped if loading data")
     if drop_old and not load:
         raise RuntimeError("Load cannot be skipped if dropping old data")
     if drop_old:

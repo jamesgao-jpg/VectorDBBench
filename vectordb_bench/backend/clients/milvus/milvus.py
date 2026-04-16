@@ -1,6 +1,7 @@
 """Wrapper around the Milvus vector database over VectorDB"""
 
 import logging
+import os
 import time
 from collections.abc import Iterable
 from contextlib import contextmanager
@@ -15,6 +16,12 @@ from .config import MilvusIndexConfig
 log = logging.getLogger(__name__)
 
 MILVUS_LOAD_REQS_SIZE = 1.5 * 1024 * 1024
+
+# Set RETURN_VECTOR=1 to include the raw vector field in every search response
+# (output_fields=[<vector_field>]). Used by the recall_field_query experiment to
+# measure the latency/QPS overhead of returning payload with each hit. Default
+# off preserves prior id-only behavior byte-for-byte.
+RETURN_VECTOR = os.environ.get("RETURN_VECTOR", "0") == "1"
 
 
 class Milvus(VectorDB):
@@ -252,13 +259,16 @@ class Milvus(VectorDB):
         """Perform a search on a query embedding and return results."""
         assert self.client is not None
 
-        res = self.client.search(
-            collection_name=self.collection_name,
-            data=[query],
-            anns_field=self._vector_field,
-            search_params=self.case_config.search_param(),
-            limit=k,
-            filter=self.expr,
-        )
+        search_kwargs = {
+            "collection_name": self.collection_name,
+            "data": [query],
+            "anns_field": self._vector_field,
+            "search_params": self.case_config.search_param(),
+            "limit": k,
+            "filter": self.expr,
+        }
+        if RETURN_VECTOR:
+            search_kwargs["output_fields"] = [self._vector_field]
+        res = self.client.search(**search_kwargs)
 
         return [result[self._primary_field] for result in res[0]]

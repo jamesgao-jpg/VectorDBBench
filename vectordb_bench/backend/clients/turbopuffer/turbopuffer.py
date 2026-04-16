@@ -33,6 +33,17 @@ TPUF_MAX_RETRIES = os.environ.get("TPUF_MAX_RETRIES")
 # backlog, at the cost of only seeing indexed data + first 128 MiB of unindexed.
 TPUF_EVENTUAL_CONSISTENCY = os.environ.get("TPUF_EVENTUAL_CONSISTENCY", "0") == "1"
 
+# Set TPUF_SKIP_CACHE_WARM=1 to make optimize() a no-op (no hint_cache_warm,
+# no sleep). Required for cold-search tests so the first query reads from
+# object storage and reports true cold latency.
+TPUF_SKIP_CACHE_WARM = os.environ.get("TPUF_SKIP_CACHE_WARM", "0") == "1"
+
+# Set RETURN_VECTOR=1 to include the raw vector field in every search response
+# (include_attributes=["vector"]). Used by the recall_field_query experiment to
+# measure the latency/QPS overhead of returning payload with each hit. Default
+# off preserves prior id-only behavior byte-for-byte.
+RETURN_VECTOR = os.environ.get("RETURN_VECTOR", "0") == "1"
+
 
 class TurboPuffer(VectorDB):
     supported_filter_types: list[FilterOp] = [
@@ -94,6 +105,9 @@ class TurboPuffer(VectorDB):
         yield
 
     def optimize(self, data_size: int | None = None):
+        if TPUF_SKIP_CACHE_WARM:
+            log.info("TPUF_SKIP_CACHE_WARM=1 set; skipping hint_cache_warm() and warmup sleep")
+            return
         # turbopuffer responds to the request
         #   once the cache warming operation has been started.
         # It does not wait for the operation to complete,
@@ -170,6 +184,8 @@ class TurboPuffer(VectorDB):
         }
         if TPUF_EVENTUAL_CONSISTENCY:
             query_kwargs["consistency"] = {"level": "eventual"}
+        if RETURN_VECTOR:
+            query_kwargs["include_attributes"] = [self._vector_field]
         res = self.ns.query(**query_kwargs)
         return [int(row.id) for row in res.rows] if res.rows is not None else []
 

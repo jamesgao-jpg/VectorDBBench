@@ -3,7 +3,7 @@
 Companion code for `turbopuffer_vs_zilliz_final_report.md`
 (`github.com/jamesgao-jpg/turbopuffer_test_results`).
 
-- **VDBBench branch / commit:** `main` @ `dd6f786`
+- **VDBBench branch / commit:** `tp_vs_zilliz_0415` @ `a177dbf`
 - **Driver host:** `m6i.2xlarge` in `aws-us-west-2`
 - **Dataset cache:** `/tmp/vectordb_bench/dataset/{laion,cohere}/...` (auto-downloaded from `s3://assets.zilliz.com/benchmark/`)
 

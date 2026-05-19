@@ -7,12 +7,12 @@ Usage:
 import logging
 import pathlib
 from enum import Enum
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 import pandas as pd
 import polars as pl
 from pyarrow.parquet import ParquetFile
-from pydantic import PrivateAttr, validator
+from pydantic import field_validator
 
 from vectordb_bench import config
 from vectordb_bench.base import BaseModel
@@ -38,7 +38,7 @@ class BaseDataset(BaseModel):
     metric_type: MetricType
     use_shuffled: bool
     with_gt: bool = False
-    _size_label: dict[int, SizeLabel] = PrivateAttr()
+    _size_label: ClassVar[dict[int, SizeLabel]]
     is_custom: bool = False
     with_remote_resource: bool = True
     # for label filter cases
@@ -57,7 +57,8 @@ class BaseDataset(BaseModel):
     gt_id_field: str = "id"
     gt_neighbors_field: str = "neighbors_id"
 
-    @validator("size")
+    @field_validator("size")
+    @classmethod
     def verify_size(cls, v: int):
         if v not in cls._size_label:
             msg = f"Size {v} not supported for the dataset, expected: {cls._size_label.keys()}"
@@ -102,7 +103,8 @@ class CustomDataset(BaseDataset):
     scalar_labels_file: str = "scalar_labels.parquet"
     label_percentages: list[float] = []
 
-    @validator("size")
+    @field_validator("size")
+    @classmethod
     def verify_size(cls, v: int):
         return v
 
@@ -136,7 +138,9 @@ class LAION(BaseDataset):
     metric_type: MetricType = MetricType.L2
     use_shuffled: bool = False
     with_gt: bool = True
-    _size_label: dict = {
+    with_scalar_labels: bool = True
+    scalar_label_percentages: list[float] = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
+    _size_label: ClassVar[dict] = {
         100_000_000: SizeLabel(100_000_000, "LARGE", 100),
     }
 
@@ -146,7 +150,7 @@ class GIST(BaseDataset):
     dim: int = 960
     metric_type: MetricType = MetricType.L2
     use_shuffled: bool = False
-    _size_label: dict = {
+    _size_label: ClassVar[dict] = {
         100_000: SizeLabel(100_000, "SMALL", 1),
         1_000_000: SizeLabel(1_000_000, "MEDIUM", 1),
     }
@@ -158,7 +162,7 @@ class Cohere(BaseDataset):
     metric_type: MetricType = MetricType.COSINE
     use_shuffled: bool = config.USE_SHUFFLED_DATA
     with_gt: bool = True
-    _size_label: dict = {
+    _size_label: ClassVar[dict] = {
         100_000: SizeLabel(100_000, "SMALL", 1),
         1_000_000: SizeLabel(1_000_000, "MEDIUM", 1),
         10_000_000: SizeLabel(10_000_000, "LARGE", 10),
@@ -196,7 +200,7 @@ class Bioasq(BaseDataset):
     metric_type: MetricType = MetricType.COSINE
     use_shuffled: bool = config.USE_SHUFFLED_DATA
     with_gt: bool = True
-    _size_label: dict = {
+    _size_label: ClassVar[dict] = {
         1_000_000: SizeLabel(1_000_000, "MEDIUM", 1),
         10_000_000: SizeLabel(10_000_000, "LARGE", 10),
     }
@@ -232,7 +236,7 @@ class Glove(BaseDataset):
     dim: int = 200
     metric_type: MetricType = MetricType.COSINE
     use_shuffled: bool = False
-    _size_label: dict = {1_000_000: SizeLabel(1_000_000, "MEDIUM", 1)}
+    _size_label: ClassVar[dict] = {1_000_000: SizeLabel(1_000_000, "MEDIUM", 1)}
 
 
 class SIFT(BaseDataset):
@@ -240,7 +244,7 @@ class SIFT(BaseDataset):
     dim: int = 128
     metric_type: MetricType = MetricType.L2
     use_shuffled: bool = False
-    _size_label: dict = {
+    _size_label: ClassVar[dict] = {
         500_000: SizeLabel(
             500_000,
             "SMALL",
@@ -257,7 +261,7 @@ class OpenAI(BaseDataset):
     metric_type: MetricType = MetricType.COSINE
     use_shuffled: bool = config.USE_SHUFFLED_DATA
     with_gt: bool = True
-    _size_label: dict = {
+    _size_label: ClassVar[dict] = {
         50_000: SizeLabel(50_000, "SMALL", 1),
         500_000: SizeLabel(500_000, "MEDIUM", 1),
         5_000_000: SizeLabel(5_000_000, "LARGE", 10),
@@ -336,11 +340,15 @@ class DatasetManager(BaseModel):
     def __iter__(self):
         return DataSetIterator(self)
 
+    def iter_batches(self, batch_size: int):
+        return DataSetIterator(self, batch_size=batch_size)
+
     # TODO passing use_shuffle from outside
     def prepare(
         self,
         source: DatasetSource = DatasetSource.S3,
         filters: Filter = non_filter,
+        with_train_files: bool = True,
     ) -> bool:
         """Download the dataset from DatasetSource
          url = f"{source}/{self.data.dir_name}"
@@ -354,7 +362,7 @@ class DatasetManager(BaseModel):
             bool: whether the dataset is successfully prepared
 
         """
-        self.train_files = self.data.train_files
+        self.train_files = self.data.train_files if with_train_files else []
         gt_file, test_file = None, None
         if self.data.with_gt:
             gt_file, test_file = filters.groundtruth_file, self.data.test_file
@@ -399,8 +407,9 @@ class DatasetManager(BaseModel):
 
 
 class DataSetIterator:
-    def __init__(self, dataset: DatasetManager):
+    def __init__(self, dataset: DatasetManager, batch_size: int = config.NUM_PER_BATCH):
         self._ds = dataset
+        self._batch_size = batch_size
         self._idx = 0  # file number
         self._cur = None
         self._sub_idx = [0 for i in range(len(self._ds.train_files))]  # iter num for each file
@@ -426,7 +435,7 @@ class DataSetIterator:
             msg = f"No such file: {p}"
             log.warning(msg)
             raise IndexError(msg)
-        return ParquetFile(p, memory_map=True, pre_buffer=True).iter_batches(config.NUM_PER_BATCH)
+        return ParquetFile(p, memory_map=True, pre_buffer=True).iter_batches(self._batch_size)
 
     def __next__(self) -> pd.DataFrame:
         """return the data in the next file of the training list"""

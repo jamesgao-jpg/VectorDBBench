@@ -1,8 +1,9 @@
 import logging
 import pathlib
+from dataclasses import asdict
 from datetime import date, datetime
 from enum import Enum, StrEnum
-from typing import Self
+from typing import Any, ClassVar, Self
 
 import ujson
 
@@ -149,11 +150,30 @@ class CaseConfigParamType(Enum):
 
     dataset_with_size_type = "dataset_with_size_type"
     filter_rate = "filter_rate"
+    payload_profile = "payload_profile"
     insert_rate = "insert_rate"
     search_stages = "search_stages"
     concurrencies = "concurrencies"
     optimize_after_write = "optimize_after_write"
     read_dur_after_write = "read_dur_after_write"
+
+    # PolarDB parameters
+    insert_workers = "insert_workers"
+    post_load_index = "post_load_index"
+    pq_nbits = "pq_nbits"
+
+    # Lindorm parameters
+    efSearch = "efSearch"
+    pq_m = "pq_m"
+    centroids_hnsw_M = "centroids_hnsw_M"
+    centroids_hnsw_efConstruction = "centroids_hnsw_efConstruction"
+    centroids_hnsw_efSearch = "centroids_hnsw_efSearch"
+    filter_type = "filter_type"
+    reorder_factor = "reorder_factor"
+    client_refactor = "client_refactor"
+    k_expand_scope = "k_expand_scope"
+    exbits = "exbits"
+    number_of_regions = "number_of_regions"
 
 
 class CustomizedCase(BaseModel):
@@ -187,7 +207,7 @@ class CaseConfig(BaseModel):
     '''
 
     def __hash__(self) -> int:
-        return hash(self.json())
+        return hash(self.model_dump_json())
 
     @property
     def case(self) -> Case:
@@ -225,6 +245,7 @@ class TaskConfig(BaseModel):
     db_case_config: DBCaseConfig
     case_config: CaseConfig
     stages: list[TaskStage] = ALL_TASK_STAGES
+    load_concurrency: int = config.LOAD_CONCURRENCY
 
     @property
     def db_name(self):
@@ -257,6 +278,68 @@ class TestResult(BaseModel):
 
     file_fmt: str = "result_{}_{}_{}.json"  # result_20230718_statndard_milvus.json
     timestamp: float = 0.0
+    sensitive_output_fields: ClassVar[set[str]] = {"api_key", "password", "token"}
+
+    @classmethod
+    def _redact_sensitive_fields(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: (
+                    "**********"
+                    if key.lower() in cls.sensitive_output_fields and item
+                    else cls._redact_sensitive_fields(item)
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._redact_sensitive_fields(item) for item in value]
+        return value
+
+    @staticmethod
+    def _output_metrics_for_case(case_result: CaseResult) -> dict:
+        metrics = asdict(case_result.metrics)
+        case_id = case_result.task_config.case_config.case_id
+
+        if case_id == CaseType.CloudInsertCase:
+            return {
+                "inserted_count": metrics["inserted_count"],
+                "insert_rows_per_second": metrics["insert_rows_per_second"],
+                "insert_completion_seconds": metrics["insert_completion_seconds"],
+                "searchable_after_insert_seconds": metrics["searchable_after_insert_seconds"],
+                "indexed_after_searchable_seconds": metrics["indexed_after_searchable_seconds"],
+                "additional_parameters": metrics["additional_parameters"],
+            }
+
+        if case_id == CaseType.CloudColdLatencyCase:
+            return {
+                "insert_duration": metrics["insert_duration"],
+                "optimize_duration": metrics["optimize_duration"],
+                "load_duration": metrics["load_duration"],
+                "payload_profile": metrics["payload_profile"],
+                "payload_estimated_bytes_per_query": metrics["payload_estimated_bytes_per_query"],
+                "cold_latency": metrics["additional_parameters"].get("cold_latency", {}),
+            }
+
+        return metrics
+
+    @staticmethod
+    def _output_case_config_for_case(case_result: CaseResult) -> dict:
+        case_config = case_result.task_config.case_config
+
+        if case_config.case_id in {CaseType.CloudInsertCase, CaseType.CloudColdLatencyCase}:
+            return {
+                "case_id": case_config.case_id.value,
+                "custom_case": case_config.custom_case,
+            }
+
+        return case_config.model_dump(mode="json")
+
+    def model_dump_for_output(self) -> dict:
+        output = self.model_dump(mode="json", serialize_as_any=True)
+        for idx, case_result in enumerate(self.results):
+            output["results"][idx]["metrics"] = self._output_metrics_for_case(case_result)
+            output["results"][idx]["task_config"]["case_config"] = self._output_case_config_for_case(case_result)
+        return self._redact_sensitive_fields(output)
 
     def flush(self):
         db2case = self.get_db_results()
@@ -295,8 +378,8 @@ class TestResult(BaseModel):
 
         log.info(f"write results to disk {result_file}")
         with pathlib.Path(result_file).open("w") as f:
-            b = partial.json(exclude={"db_config": {"password", "api_key"}})
-            f.write(b)
+            f.write(ujson.dumps(partial.model_dump_for_output(), indent=2))
+            f.write("\n")
 
     def get_case_config(case_config: CaseConfig) -> dict[CaseConfig]:
         if case_config["case_id"] in {6, 7, 8, 9, 12, 13, 14, 15}:
@@ -341,6 +424,13 @@ class TestResult(BaseModel):
 
                 task_config["case_config"] = cls.get_case_config(case_config=case_config)
                 case_result["task_config"] = task_config
+                metrics = case_result.get("metrics")
+                if (
+                    metrics
+                    and CaseType(case_config.get("case_id")) == CaseType.CloudColdLatencyCase
+                    and "cold_latency" in metrics
+                ):
+                    metrics.setdefault("additional_parameters", {})["cold_latency"] = metrics.pop("cold_latency")
 
                 if trans_unit:
                     cur_max_count = case_result["metrics"]["max_load_count"]
@@ -362,7 +452,7 @@ class TestResult(BaseModel):
                     else:
                         # Default to 0 for older result files that don't have P95 data
                         case_result["metrics"]["serial_latency_p95"] = 0.0
-            return TestResult.validate(test_result)
+            return TestResult.model_validate(test_result)
 
     def display(self, dbs: list[DB] | None = None):
         filter_list = dbs if dbs and isinstance(dbs, list) else None

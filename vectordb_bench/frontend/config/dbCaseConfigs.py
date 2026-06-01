@@ -299,6 +299,48 @@ def generate_int_filter_cases(dataset_with_size_type: DatasetWithSizeType) -> li
     ]
 
 
+CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES = ("ids_only", "scalar_label", "vector")
+CLOUD_PAYLOAD_SEARCH_INT_FILTER_RATES = (0.999, 0.99, 0.9, 0.5)
+CLOUD_PAYLOAD_SEARCH_LABEL_PERCENTAGES = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5)
+
+
+def generate_cloud_payload_search_cases(filter_mode: str | None = None) -> list[CaseConfig]:
+    cases = []
+    if filter_mode in (None, "unfiltered"):
+        cases.extend(
+            CaseConfig(
+                case_id=CaseType.CloudPayloadSearchCase,
+                custom_case={"payload_profile": payload_profile},
+            )
+            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+        )
+    if filter_mode in (None, "int_filter"):
+        cases.extend(
+            CaseConfig(
+                case_id=CaseType.CloudPayloadSearchCase,
+                custom_case={
+                    "payload_profile": payload_profile,
+                    "filter_rate": filter_rate,
+                },
+            )
+            for filter_rate in CLOUD_PAYLOAD_SEARCH_INT_FILTER_RATES
+            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+        )
+    if filter_mode in (None, "scalar_label_filter"):
+        cases.extend(
+            CaseConfig(
+                case_id=CaseType.CloudPayloadSearchCase,
+                custom_case={
+                    "payload_profile": payload_profile,
+                    "label_percentage": label_percentage,
+                },
+            )
+            for label_percentage in CLOUD_PAYLOAD_SEARCH_LABEL_PERCENTAGES
+            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+        )
+    return cases
+
+
 UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
     UICaseItemCluster(
         label="Search Performance Test",
@@ -367,6 +409,35 @@ UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
                 cases=generate_label_filter_cases(dataset_with_size_type),
             )
             for dataset_with_size_type in DatasetWithSizeType
+        ],
+    ),
+    UICaseItemCluster(
+        label="Cloud Payload Search",
+        uiCaseItems=[
+            UICaseItem(
+                label="Cloud Payload Search - Unfiltered",
+                description=(
+                    "[Batch Cases] Runs CloudPayloadSearchCase on LAION 100M without filters "
+                    "for IDs-only, scalar-label, and vector response payloads."
+                ),
+                cases=generate_cloud_payload_search_cases("unfiltered"),
+            ),
+            UICaseItem(
+                label="Cloud Payload Search - Integer Filter",
+                description=(
+                    "[Batch Cases] Runs CloudPayloadSearchCase on LAION 100M with integer "
+                    "filter rates 99.9%, 99%, 90%, and 50% for all response payload profiles."
+                ),
+                cases=generate_cloud_payload_search_cases("int_filter"),
+            ),
+            UICaseItem(
+                label="Cloud Payload Search - Scalar Label Filter",
+                description=(
+                    "[Batch Cases] Runs CloudPayloadSearchCase on LAION 100M with scalar-label "
+                    "filter rates 0.1% through 50% for all response payload profiles."
+                ),
+                cases=generate_cloud_payload_search_cases("scalar_label_filter"),
+            ),
         ],
     ),
     UICaseItemCluster(

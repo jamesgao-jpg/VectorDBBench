@@ -92,7 +92,9 @@ def controlPanel(container, tasks: list[TaskConfig], taskLabel, isAllValid):
     def stopHandler():
         benchmark_runner.stop_running()
 
-    @st.fragment(run_every=f"{styles.MAX_AUTO_REFRESH_INTERVAL / 1000}s")
+    refresh_interval = f"{styles.MAX_AUTO_REFRESH_INTERVAL / 1000}s" if benchmark_runner.has_running() else None
+
+    @st.fragment(run_every=refresh_interval)
     def _renderLiveStatus():
         if benchmark_runner.has_running():
             currentTaskId = benchmark_runner.get_current_task_id()

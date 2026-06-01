@@ -5,7 +5,7 @@ import pytest
 
 from vectordb_bench.backend.result_collector import ResultCollector
 from vectordb_bench.frontend.components.check_results.nav import NavToPages
-from vectordb_bench.frontend.pages.cloudleaderboard import (
+from vectordb_bench.frontend.pages.cloud_payload_search import (
     PAGE_CASE_CAPTION,
     PAGE_HEADER_CAPTION,
     PAGE_HEADER_TITLE,
@@ -209,7 +209,7 @@ def test_top_nav_links_to_cloud_payload_search_page():
 
     NavToPages(fake)
 
-    assert "/cloudleaderboard" in fake.html
+    assert "/cloud_payload_search" in fake.html
     assert "Cloud Payload Search" in fake.html
     assert "Cloud Leaderboard" not in fake.html
 

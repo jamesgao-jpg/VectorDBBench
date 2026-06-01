@@ -30,6 +30,7 @@ def NavToPages(st):
         {"name": "Label Filter", "link": "label_filter"},
         {"name": "Int Filter", "link": "int_filter"},
         {"name": "Streaming", "link": "streaming"},
+        {"name": "Cloud Payload Search", "link": "cloudleaderboard"},
         {"name": "Tables", "link": "tables"},
         {"name": "Custom Dataset", "link": "custom"},
     ]

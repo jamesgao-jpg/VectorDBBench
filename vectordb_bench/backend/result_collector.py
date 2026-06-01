@@ -35,10 +35,14 @@ class ResultCollector:
             msg = f"Unsupported result grouping: {group_by}"
             raise ValueError(msg)
 
-        if not result_dir.exists() or len(list(result_dir.rglob(reg))) == 0:
+        if not result_dir.exists():
             return []
 
-        for json_file in sorted(result_dir.rglob(reg)):
+        json_files = sorted(cls._iter_result_files(result_dir, reg))
+        if not json_files:
+            return []
+
+        for json_file in json_files:
             file_result = TestResult.read_file(json_file, trans_unit=trans_unit)
             key = cls._group_key(file_result, group_by)
 
@@ -50,6 +54,17 @@ class ResultCollector:
                 results_d[key] = file_result
 
         return list(results_d.values())
+
+    @staticmethod
+    def _iter_result_files(result_dir: pathlib.Path, pattern: str):
+        for json_file in result_dir.rglob(pattern):
+            try:
+                relative_parts = json_file.relative_to(result_dir).parts
+            except ValueError:
+                relative_parts = json_file.parts
+            if "cloudleaderboard" in relative_parts:
+                continue
+            yield json_file
 
     @classmethod
     def merge_by_db(

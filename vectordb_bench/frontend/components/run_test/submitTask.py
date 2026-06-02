@@ -92,9 +92,6 @@ def controlPanel(container, tasks: list[TaskConfig], taskLabel, isAllValid):
     def stopHandler():
         benchmark_runner.stop_running()
 
-    refresh_interval = f"{styles.MAX_AUTO_REFRESH_INTERVAL / 1000}s" if benchmark_runner.has_running() else None
-
-    @st.fragment(run_every=refresh_interval)
     def _renderLiveStatus():
         if benchmark_runner.has_running():
             currentTaskId = benchmark_runner.get_current_task_id()
@@ -115,6 +112,11 @@ def controlPanel(container, tasks: list[TaskConfig], taskLabel, isAllValid):
                 on_click=stopHandler,
                 type="primary",
                 key="stop-btn",
+            )
+            cols[2].button(
+                "Refresh Status",
+                on_click=st.rerun,
+                key="refresh-status-btn",
             )
         else:
             errorText = benchmark_runner.latest_error or ""

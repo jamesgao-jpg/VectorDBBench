@@ -23,6 +23,7 @@ class FakeBenchmarkRunner:
 class FakeStreamlit:
     def __init__(self):
         self.fragment_run_every = []
+        self.button_calls = []
 
     def fragment(self, run_every=None):
         self.fragment_run_every.append(run_every)
@@ -40,7 +41,11 @@ class FakeStreamlit:
         return [self for _ in range(count)]
 
     def button(self, *args, **kwargs):
+        self.button_calls.append((args, kwargs))
         return False
+
+    def rerun(self):
+        pass
 
     def error(self, *args, **kwargs):
         pass
@@ -62,17 +67,18 @@ def _patch_control_panel_dependencies(monkeypatch, running):
     return fake_st
 
 
-def test_run_test_control_panel_does_not_auto_refresh_when_idle(monkeypatch):
+def test_run_test_control_panel_does_not_create_fragment_when_idle(monkeypatch):
     fake_st = _patch_control_panel_dependencies(monkeypatch, running=False)
 
     submitTask.controlPanel(object(), tasks=[], taskLabel="test", isAllValid=True)
 
-    assert fake_st.fragment_run_every == [None]
+    assert fake_st.fragment_run_every == []
 
 
-def test_run_test_control_panel_auto_refreshes_while_running(monkeypatch):
+def test_run_test_control_panel_does_not_create_fragment_while_running(monkeypatch):
     fake_st = _patch_control_panel_dependencies(monkeypatch, running=True)
 
     submitTask.controlPanel(object(), tasks=[], taskLabel="test", isAllValid=True)
 
-    assert fake_st.fragment_run_every == ["5.0s"]
+    assert fake_st.fragment_run_every == []
+    assert any(kwargs.get("key") == "refresh-status-btn" for _, kwargs in fake_st.button_calls)

@@ -314,6 +314,8 @@ CLOUD_MULTI_TENANT_SEARCH_CUSTOM_CASE = {
     "tenant_prefix": "tenant_",
     "tenant_id_width": 4,
 }
+CLOUD_INSERT_BATCH_SIZES = (1000, 5000, 10000)
+CLOUD_INSERT_DATASET = DatasetWithSizeType.LAIONLarge.value
 
 
 def _cloud_payload_profiles(payload_profile: str | None = None) -> tuple[str, ...]:
@@ -418,6 +420,21 @@ def generate_cloud_multi_tenant_search_cases(
     return cases
 
 
+def generate_cloud_insert_cases(batch_size: int | None = None) -> list[CaseConfig]:
+    batch_sizes = CLOUD_INSERT_BATCH_SIZES if batch_size is None else (batch_size,)
+    return [
+        CaseConfig(
+            case_id=CaseType.CloudInsertCase,
+            custom_case={
+                "batch_size": batch_size,
+                "duration": None,
+                "dataset_with_size_type": CLOUD_INSERT_DATASET,
+            },
+        )
+        for batch_size in batch_sizes
+    ]
+
+
 def _cloud_payload_search_ui_items() -> list[UICaseItem]:
     filter_modes = (
         (
@@ -480,6 +497,26 @@ def _cloud_multi_tenant_search_ui_items() -> list[UICaseItem]:
         for filter_mode, filter_label, filter_description in filter_modes
         for payload_profile, payload_label in CLOUD_PAYLOAD_SEARCH_PAYLOAD_LABELS.items()
     ]
+
+
+def _cloud_insert_ui_items() -> list[UICaseItem]:
+    return [
+        UICaseItem(
+            label=f"Cloud Insert - LAION 100M - Batch {_batch_size_label(batch_size)}",
+            description=(
+                "Runs CloudInsertCase on LAION 100M and records insert throughput "
+                "plus searchable/indexed readiness timing."
+            ),
+            cases=generate_cloud_insert_cases(batch_size),
+        )
+        for batch_size in CLOUD_INSERT_BATCH_SIZES
+    ]
+
+
+def _batch_size_label(batch_size: int) -> str:
+    if batch_size % 1000 == 0:
+        return f"{batch_size // 1000}k"
+    return str(batch_size)
 
 
 UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
@@ -559,6 +596,10 @@ UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
     UICaseItemCluster(
         label="Cloud Multi-Tenant Search",
         uiCaseItems=_cloud_multi_tenant_search_ui_items(),
+    ),
+    UICaseItemCluster(
+        label="Cloud Insert",
+        uiCaseItems=_cloud_insert_ui_items(),
     ),
     UICaseItemCluster(
         label="Capacity Test",

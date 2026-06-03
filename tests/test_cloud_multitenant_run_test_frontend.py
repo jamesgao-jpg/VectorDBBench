@@ -34,9 +34,15 @@ def test_run_test_page_registers_cloud_multi_tenant_search_cluster():
     )
 
     assert [item.label for item in cluster.uiCaseItems] == [
-        "Cloud Multi-Tenant Search - Unfiltered",
-        "Cloud Multi-Tenant Search - Integer Filter",
-        "Cloud Multi-Tenant Search - Scalar Label Filter",
+        "Cloud Multi-Tenant Search - Unfiltered - IDs Only",
+        "Cloud Multi-Tenant Search - Unfiltered - Scalar Label",
+        "Cloud Multi-Tenant Search - Unfiltered - Vector",
+        "Cloud Multi-Tenant Search - Integer Filter - IDs Only",
+        "Cloud Multi-Tenant Search - Integer Filter - Scalar Label",
+        "Cloud Multi-Tenant Search - Integer Filter - Vector",
+        "Cloud Multi-Tenant Search - Scalar Label Filter - IDs Only",
+        "Cloud Multi-Tenant Search - Scalar Label Filter - Scalar Label",
+        "Cloud Multi-Tenant Search - Scalar Label Filter - Vector",
     ]
     assert all(
         case.case_id == CaseType.CloudMultiTenantSearchCase
@@ -58,12 +64,43 @@ def test_cloud_multi_tenant_search_selection_generates_task_configs():
         {DB.Test: {case: {} for case in selected_cases}},
     )
 
-    assert len(tasks) == 3
+    assert len(tasks) == 1
     assert {task.case_config.case_id for task in tasks} == {CaseType.CloudMultiTenantSearchCase}
     assert {task.case_config.k for task in tasks} == {50}
-    assert {task.case_config.custom_case["payload_profile"] for task in tasks} == {
-        "ids_only",
-        "scalar_label",
-        "vector",
+    assert {task.case_config.custom_case["payload_profile"] for task in tasks} == {"ids_only"}
+    assert {task.case_config.custom_case["tenant_count"] for task in tasks} == {1000}
+
+
+def test_cloud_multi_tenant_scalar_label_payload_selection_generates_filter_tasks():
+    cluster = next(
+        cluster for cluster in UI_CASE_CLUSTERS if cluster.label == "Cloud Multi-Tenant Search"
+    )
+    scalar_label_filter = next(
+        item
+        for item in cluster.uiCaseItems
+        if item.label == "Cloud Multi-Tenant Search - Scalar Label Filter - Scalar Label"
+    )
+    selected_cases = scalar_label_filter.get_cases()
+
+    tasks = generate_tasks(
+        [DB.Test],
+        {DB.Test: DB.Test.config_cls()},
+        selected_cases,
+        {DB.Test: {case: {} for case in selected_cases}},
+    )
+
+    assert len(tasks) == 9
+    assert {task.case_config.case_id for task in tasks} == {CaseType.CloudMultiTenantSearchCase}
+    assert {task.case_config.custom_case["payload_profile"] for task in tasks} == {"scalar_label"}
+    assert {task.case_config.custom_case["label_percentage"] for task in tasks} == {
+        0.001,
+        0.002,
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2,
+        0.5,
     }
     assert {task.case_config.custom_case["tenant_count"] for task in tasks} == {1000}

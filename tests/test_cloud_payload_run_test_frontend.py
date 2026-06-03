@@ -28,9 +28,15 @@ def test_run_test_page_registers_cloud_payload_search_cluster():
     )
 
     assert [item.label for item in cluster.uiCaseItems] == [
-        "Cloud Payload Search - Unfiltered",
-        "Cloud Payload Search - Integer Filter",
-        "Cloud Payload Search - Scalar Label Filter",
+        "Cloud Payload Search - Unfiltered - IDs Only",
+        "Cloud Payload Search - Unfiltered - Scalar Label",
+        "Cloud Payload Search - Unfiltered - Vector",
+        "Cloud Payload Search - Integer Filter - IDs Only",
+        "Cloud Payload Search - Integer Filter - Scalar Label",
+        "Cloud Payload Search - Integer Filter - Vector",
+        "Cloud Payload Search - Scalar Label Filter - IDs Only",
+        "Cloud Payload Search - Scalar Label Filter - Scalar Label",
+        "Cloud Payload Search - Scalar Label Filter - Vector",
     ]
     assert all(
         case.case_id == CaseType.CloudPayloadSearchCase
@@ -52,10 +58,27 @@ def test_cloud_payload_search_selection_generates_task_configs():
         {DB.Test: {case: {} for case in selected_cases}},
     )
 
-    assert len(tasks) == 3
+    assert len(tasks) == 1
     assert {task.case_config.case_id for task in tasks} == {CaseType.CloudPayloadSearchCase}
-    assert {task.case_config.custom_case["payload_profile"] for task in tasks} == {
-        "ids_only",
-        "scalar_label",
-        "vector",
-    }
+    assert {task.case_config.custom_case["payload_profile"] for task in tasks} == {"ids_only"}
+
+
+def test_cloud_payload_integer_filter_payload_selection_generates_filter_tasks():
+    cluster = next(
+        cluster for cluster in UI_CASE_CLUSTERS if cluster.label == "Cloud Payload Search"
+    )
+    vector_integer_filter = next(
+        item for item in cluster.uiCaseItems if item.label == "Cloud Payload Search - Integer Filter - Vector"
+    )
+    selected_cases = vector_integer_filter.get_cases()
+
+    tasks = generate_tasks(
+        [DB.Test],
+        {DB.Test: DB.Test.config_cls()},
+        selected_cases,
+        {DB.Test: {case: {} for case in selected_cases}},
+    )
+
+    assert len(tasks) == 4
+    assert {task.case_config.custom_case["payload_profile"] for task in tasks} == {"vector"}
+    assert {task.case_config.custom_case["filter_rate"] for task in tasks} == {0.999, 0.99, 0.9, 0.5}

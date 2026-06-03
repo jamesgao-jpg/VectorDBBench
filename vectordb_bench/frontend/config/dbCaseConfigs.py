@@ -300,6 +300,11 @@ def generate_int_filter_cases(dataset_with_size_type: DatasetWithSizeType) -> li
 
 
 CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES = ("ids_only", "scalar_label", "vector")
+CLOUD_PAYLOAD_SEARCH_PAYLOAD_LABELS = {
+    "ids_only": "IDs Only",
+    "scalar_label": "Scalar Label",
+    "vector": "Vector",
+}
 CLOUD_PAYLOAD_SEARCH_INT_FILTER_RATES = (0.999, 0.99, 0.9, 0.5)
 CLOUD_PAYLOAD_SEARCH_LABEL_PERCENTAGES = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5)
 CLOUD_MULTI_TENANT_SEARCH_TOP_K = 50
@@ -311,15 +316,28 @@ CLOUD_MULTI_TENANT_SEARCH_CUSTOM_CASE = {
 }
 
 
-def generate_cloud_payload_search_cases(filter_mode: str | None = None) -> list[CaseConfig]:
+def _cloud_payload_profiles(payload_profile: str | None = None) -> tuple[str, ...]:
+    if payload_profile is None:
+        return CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+    if payload_profile not in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES:
+        msg = f"Unknown cloud payload profile: {payload_profile}"
+        raise ValueError(msg)
+    return (payload_profile,)
+
+
+def generate_cloud_payload_search_cases(
+    filter_mode: str | None = None,
+    payload_profile: str | None = None,
+) -> list[CaseConfig]:
     cases = []
+    payload_profiles = _cloud_payload_profiles(payload_profile)
     if filter_mode in (None, "unfiltered"):
         cases.extend(
             CaseConfig(
                 case_id=CaseType.CloudPayloadSearchCase,
                 custom_case={"payload_profile": payload_profile},
             )
-            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+            for payload_profile in payload_profiles
         )
     if filter_mode in (None, "int_filter"):
         cases.extend(
@@ -331,7 +349,7 @@ def generate_cloud_payload_search_cases(filter_mode: str | None = None) -> list[
                 },
             )
             for filter_rate in CLOUD_PAYLOAD_SEARCH_INT_FILTER_RATES
-            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+            for payload_profile in payload_profiles
         )
     if filter_mode in (None, "scalar_label_filter"):
         cases.extend(
@@ -343,7 +361,7 @@ def generate_cloud_payload_search_cases(filter_mode: str | None = None) -> list[
                 },
             )
             for label_percentage in CLOUD_PAYLOAD_SEARCH_LABEL_PERCENTAGES
-            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+            for payload_profile in payload_profiles
         )
     return cases
 
@@ -356,8 +374,12 @@ def _cloud_multi_tenant_custom_case(payload_profile: str, **overrides) -> dict:
     }
 
 
-def generate_cloud_multi_tenant_search_cases(filter_mode: str | None = None) -> list[CaseConfig]:
+def generate_cloud_multi_tenant_search_cases(
+    filter_mode: str | None = None,
+    payload_profile: str | None = None,
+) -> list[CaseConfig]:
     cases = []
+    payload_profiles = _cloud_payload_profiles(payload_profile)
     if filter_mode in (None, "unfiltered"):
         cases.extend(
             CaseConfig(
@@ -365,7 +387,7 @@ def generate_cloud_multi_tenant_search_cases(filter_mode: str | None = None) -> 
                 k=CLOUD_MULTI_TENANT_SEARCH_TOP_K,
                 custom_case=_cloud_multi_tenant_custom_case(payload_profile),
             )
-            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+            for payload_profile in payload_profiles
         )
     if filter_mode in (None, "int_filter"):
         cases.extend(
@@ -378,7 +400,7 @@ def generate_cloud_multi_tenant_search_cases(filter_mode: str | None = None) -> 
                 ),
             )
             for filter_rate in CLOUD_PAYLOAD_SEARCH_INT_FILTER_RATES
-            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+            for payload_profile in payload_profiles
         )
     if filter_mode in (None, "scalar_label_filter"):
         cases.extend(
@@ -391,9 +413,73 @@ def generate_cloud_multi_tenant_search_cases(filter_mode: str | None = None) -> 
                 ),
             )
             for label_percentage in CLOUD_PAYLOAD_SEARCH_LABEL_PERCENTAGES
-            for payload_profile in CLOUD_PAYLOAD_SEARCH_PAYLOAD_PROFILES
+            for payload_profile in payload_profiles
         )
     return cases
+
+
+def _cloud_payload_search_ui_items() -> list[UICaseItem]:
+    filter_modes = (
+        (
+            "unfiltered",
+            "Unfiltered",
+            "without filters",
+        ),
+        (
+            "int_filter",
+            "Integer Filter",
+            "with integer filter rates 99.9%, 99%, 90%, and 50%",
+        ),
+        (
+            "scalar_label_filter",
+            "Scalar Label Filter",
+            "with scalar-label filter rates 0.1% through 50%",
+        ),
+    )
+    return [
+        UICaseItem(
+            label=f"Cloud Payload Search - {filter_label} - {payload_label}",
+            description=(
+                f"Runs CloudPayloadSearchCase on LAION 100M {filter_description} "
+                f"and returns {payload_label} response payloads."
+            ),
+            cases=generate_cloud_payload_search_cases(filter_mode, payload_profile),
+        )
+        for filter_mode, filter_label, filter_description in filter_modes
+        for payload_profile, payload_label in CLOUD_PAYLOAD_SEARCH_PAYLOAD_LABELS.items()
+    ]
+
+
+def _cloud_multi_tenant_search_ui_items() -> list[UICaseItem]:
+    filter_modes = (
+        (
+            "unfiltered",
+            "Unfiltered",
+            "with no search filter",
+        ),
+        (
+            "int_filter",
+            "Integer Filter",
+            "with integer filter rates 99.9%, 99%, 90%, and 50%",
+        ),
+        (
+            "scalar_label_filter",
+            "Scalar Label Filter",
+            "with scalar-label filter rates 0.1% through 50%",
+        ),
+    )
+    return [
+        UICaseItem(
+            label=f"Cloud Multi-Tenant Search - {filter_label} - {payload_label}",
+            description=(
+                "Runs CloudMultiTenantSearchCase on Cohere 10M with 1,000 tenants "
+                f"{filter_description} and returns {payload_label} response payloads."
+            ),
+            cases=generate_cloud_multi_tenant_search_cases(filter_mode, payload_profile),
+        )
+        for filter_mode, filter_label, filter_description in filter_modes
+        for payload_profile, payload_label in CLOUD_PAYLOAD_SEARCH_PAYLOAD_LABELS.items()
+    ]
 
 
 UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
@@ -468,61 +554,11 @@ UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
     ),
     UICaseItemCluster(
         label="Cloud Payload Search",
-        uiCaseItems=[
-            UICaseItem(
-                label="Cloud Payload Search - Unfiltered",
-                description=(
-                    "[Batch Cases] Runs CloudPayloadSearchCase on LAION 100M without filters "
-                    "for IDs-only, scalar-label, and vector response payloads."
-                ),
-                cases=generate_cloud_payload_search_cases("unfiltered"),
-            ),
-            UICaseItem(
-                label="Cloud Payload Search - Integer Filter",
-                description=(
-                    "[Batch Cases] Runs CloudPayloadSearchCase on LAION 100M with integer "
-                    "filter rates 99.9%, 99%, 90%, and 50% for all response payload profiles."
-                ),
-                cases=generate_cloud_payload_search_cases("int_filter"),
-            ),
-            UICaseItem(
-                label="Cloud Payload Search - Scalar Label Filter",
-                description=(
-                    "[Batch Cases] Runs CloudPayloadSearchCase on LAION 100M with scalar-label "
-                    "filter rates 0.1% through 50% for all response payload profiles."
-                ),
-                cases=generate_cloud_payload_search_cases("scalar_label_filter"),
-            ),
-        ],
+        uiCaseItems=_cloud_payload_search_ui_items(),
     ),
     UICaseItemCluster(
         label="Cloud Multi-Tenant Search",
-        uiCaseItems=[
-            UICaseItem(
-                label="Cloud Multi-Tenant Search - Unfiltered",
-                description=(
-                    "[Batch Cases] Runs CloudMultiTenantSearchCase on Cohere 10M with 1,000 tenants "
-                    "and no search filter for IDs-only, scalar-label, and vector response payloads."
-                ),
-                cases=generate_cloud_multi_tenant_search_cases("unfiltered"),
-            ),
-            UICaseItem(
-                label="Cloud Multi-Tenant Search - Integer Filter",
-                description=(
-                    "[Batch Cases] Runs CloudMultiTenantSearchCase on Cohere 10M with 1,000 tenants "
-                    "and integer filter rates 99.9%, 99%, 90%, and 50% for all response payload profiles."
-                ),
-                cases=generate_cloud_multi_tenant_search_cases("int_filter"),
-            ),
-            UICaseItem(
-                label="Cloud Multi-Tenant Search - Scalar Label Filter",
-                description=(
-                    "[Batch Cases] Runs CloudMultiTenantSearchCase on Cohere 10M with 1,000 tenants "
-                    "and scalar-label filter rates 0.1% through 50% for all response payload profiles."
-                ),
-                cases=generate_cloud_multi_tenant_search_cases("scalar_label_filter"),
-            ),
-        ],
+        uiCaseItems=_cloud_multi_tenant_search_ui_items(),
     ),
     UICaseItemCluster(
         label="Capacity Test",

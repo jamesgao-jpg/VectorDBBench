@@ -61,7 +61,7 @@ def main():
     df = pd.DataFrame.from_records(records)
     st.dataframe(df, hide_index=True, use_container_width=True)
 
-    _draw_charts_by_concurrency(st, records)
+    _draw_charts_by_search_mode(st, records)
     _draw_detail_section(st, shown_rows)
 
     footer(st.container())
@@ -109,22 +109,22 @@ def _filter_rows(rows: list[MultiTenantSearchRow]) -> list[MultiTenantSearchRow]
 
 
 def _draw_qps_chart(container, df: pd.DataFrame):
-    concurrency_label, filter_label, payload_label = _chart_selection_labels(df)
+    filter_label, payload_label = _chart_selection_labels(df)
     fig = px.bar(
         df,
         x="Max QPS",
         y="Product",
         color="Payload",
-        hover_data=["Filter", "Tenant Count", "Top K", "Best Concurrency"],
+        hover_data=["Filter", "Tenant Count", "Top K", "Concurrency", "Best Concurrency"],
         orientation="h",
-        title=f"Max QPS - {concurrency_label} / {filter_label} / {payload_label}",
+        title=f"Max QPS - {filter_label} / {payload_label}",
     )
     fig.update_layout(margin=dict(l=0, r=0, t=48, b=0), legend_title_text="")
     container.plotly_chart(fig, width="stretch")
 
 
 def _draw_latency_chart(container, df: pd.DataFrame):
-    concurrency_label, filter_label, payload_label = _chart_selection_labels(df)
+    filter_label, payload_label = _chart_selection_labels(df)
     latency_df = df.melt(
         id_vars=["Product", "Search Mode", "Filter", "Payload", "Concurrency"],
         value_vars=["P95 Latency (s)", "P99 Latency (s)"],
@@ -138,7 +138,7 @@ def _draw_latency_chart(container, df: pd.DataFrame):
         color="Latency Metric",
         hover_data=["Filter", "Payload", "Concurrency"],
         orientation="h",
-        title=f"Latency at Best Concurrency - {concurrency_label} / {filter_label} / {payload_label}",
+        title=f"Latency at Best Concurrency - {filter_label} / {payload_label}",
     )
     fig.update_layout(margin=dict(l=0, r=0, t=48, b=0), legend_title_text="")
     container.plotly_chart(fig, width="stretch")
@@ -171,39 +171,29 @@ def _draw_detail_section(container, rows: list[MultiTenantSearchRow]):
         detail.caption("No per-concurrency details are available for the selected rows.")
 
 
-def _draw_charts_by_concurrency(container, records: list[dict]):
-    grouped = chart_records_by_concurrency_signature(records)
+def _draw_charts_by_search_mode(container, records: list[dict]):
+    grouped = chart_records_by_search_mode(records)
     tabs = container.tabs(list(grouped.keys()))
-    for tab, (concurrency_signature, concurrency_records) in zip(tabs, grouped.items()):
-        search_modes = sorted({record["Search Mode"] for record in concurrency_records})
-        control_columns = tab.columns(3)
-        selected_mode = control_columns[0].selectbox(
-            "Chart Search Mode",
-            search_modes,
-            key=f"cloud-mt-chart-mode-{concurrency_signature}",
-        )
-        mode_records = [
-            record for record in concurrency_records if record["Search Mode"] == selected_mode
-        ]
+    for tab, (search_mode, mode_records) in zip(tabs, grouped.items()):
         filters = sorted({record["Filter"] for record in mode_records}, key=_filter_sort_key)
+        control_columns = tab.columns(2)
         selected_filter = control_columns[1].selectbox(
             "Chart Filter Rate",
             filters,
-            key=f"cloud-mt-chart-filter-{concurrency_signature}",
+            key=f"cloud-mt-chart-filter-{search_mode}",
         )
         filter_records = [
             record for record in mode_records if record["Filter"] == selected_filter
         ]
         payloads = sorted({record["Payload"] for record in filter_records})
-        selected_payload = control_columns[2].selectbox(
+        selected_payload = control_columns[0].selectbox(
             "Chart Payload",
             payloads,
-            key=f"cloud-mt-chart-payload-{concurrency_signature}",
+            key=f"cloud-mt-chart-payload-{search_mode}",
         )
         selected_records = chart_records_for_selection(
-            concurrency_records,
-            concurrency_signature=concurrency_signature,
-            search_mode=selected_mode,
+            mode_records,
+            search_mode=search_mode,
             filter_display=selected_filter,
             payload=selected_payload,
         )
@@ -217,17 +207,16 @@ def _draw_charts_by_concurrency(container, records: list[dict]):
         _draw_latency_chart(chart_columns[1], chart_df)
 
 
-def chart_records_by_concurrency_signature(records: list[dict]) -> dict[str, list[dict]]:
+def chart_records_by_search_mode(records: list[dict]) -> dict[str, list[dict]]:
     grouped: dict[str, list[dict]] = {}
     for record in records:
-        grouped.setdefault(record["Concurrency"], []).append(record)
+        grouped.setdefault(record["Search Mode"], []).append(record)
     return grouped
 
 
 def chart_records_for_selection(
     records: list[dict],
     *,
-    concurrency_signature: str,
     search_mode: str,
     filter_display: str,
     payload: str,
@@ -235,8 +224,7 @@ def chart_records_for_selection(
     return [
         record
         for record in records
-        if record["Concurrency"] == concurrency_signature
-        and record["Search Mode"] == search_mode
+        if record["Search Mode"] == search_mode
         and record["Filter"] == filter_display
         and record["Payload"] == payload
     ]
@@ -278,11 +266,10 @@ def _value_at(values, index: int):
     return values[index]
 
 
-def _chart_selection_labels(df: pd.DataFrame) -> tuple[str, str, str]:
-    concurrency_label = str(df["Concurrency"].iloc[0]) if "Concurrency" in df and not df.empty else "Selected"
+def _chart_selection_labels(df: pd.DataFrame) -> tuple[str, str]:
     filter_label = str(df["Filter"].iloc[0]) if "Filter" in df and not df.empty else "Selected Filter"
     payload_label = str(df["Payload"].iloc[0]) if "Payload" in df and not df.empty else "Selected Payload"
-    return concurrency_label, filter_label, payload_label
+    return filter_label, payload_label
 
 
 if __name__ == "__main__":

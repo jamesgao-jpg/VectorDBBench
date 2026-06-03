@@ -15,7 +15,8 @@ from vectordb_bench.frontend.pages.cloud_multi_tenant_search import (
     PAGE_CASE_TITLE,
     PAGE_HEADER_CAPTION,
     PAGE_HEADER_TITLE,
-    chart_records_by_concurrency_signature,
+    _draw_charts_by_search_mode,
+    chart_records_by_search_mode,
     chart_records_for_selection,
 )
 
@@ -226,19 +227,19 @@ def test_top_nav_links_to_cloud_multi_tenant_search_page():
     assert "Cloud Multi-Tenant Search" in fake.html
 
 
-def test_multi_tenant_chart_records_are_split_by_concurrency_signature():
+def test_multi_tenant_chart_records_are_combined_across_concurrency_groups():
     records = [
-        {"Concurrency": "c4", "Product": "Pinecone Serverless"},
-        {"Concurrency": "c60,c80", "Product": "Zilliz Cloud Capacity 2CU"},
-        {"Concurrency": "c4", "Product": "Pinecone Serverless"},
+        {"Search Mode": "Integer Filter", "Concurrency": "c4", "Product": "Pinecone Serverless"},
+        {"Search Mode": "Integer Filter", "Concurrency": "c60,c80", "Product": "Zilliz Cloud Capacity 2CU"},
+        {"Search Mode": "Scalar Label Filter", "Concurrency": "c60,c80", "Product": "Turbopuffer"},
     ]
 
-    grouped = chart_records_by_concurrency_signature(records)
+    grouped = chart_records_by_search_mode(records)
 
-    assert list(grouped.keys()) == ["c4", "c60,c80"]
-    assert grouped["c4"] == [
-        {"Concurrency": "c4", "Product": "Pinecone Serverless"},
-        {"Concurrency": "c4", "Product": "Pinecone Serverless"},
+    assert list(grouped.keys()) == ["Integer Filter", "Scalar Label Filter"]
+    assert grouped["Integer Filter"] == [
+        {"Search Mode": "Integer Filter", "Concurrency": "c4", "Product": "Pinecone Serverless"},
+        {"Search Mode": "Integer Filter", "Concurrency": "c60,c80", "Product": "Zilliz Cloud Capacity 2CU"},
     ]
 
 
@@ -252,15 +253,78 @@ def test_multi_tenant_chart_records_for_selection_show_one_filter_rate_and_paylo
 
     selected = chart_records_for_selection(
         records,
-        concurrency_signature="c60,c80",
         search_mode="Integer Filter",
         filter_display="50%",
         payload="IDs Only",
     )
 
     assert selected == [
-        {"Concurrency": "c60,c80", "Search Mode": "Integer Filter", "Filter": "50%", "Payload": "IDs Only"}
+        {"Concurrency": "c60,c80", "Search Mode": "Integer Filter", "Filter": "50%", "Payload": "IDs Only"},
+        {"Concurrency": "c4", "Search Mode": "Integer Filter", "Filter": "50%", "Payload": "IDs Only"},
     ]
+
+
+def test_multi_tenant_chart_draws_each_search_mode_without_concurrency_tabs():
+    class FakeTab:
+        def __init__(self):
+            self.chart_count = 0
+
+        def columns(self, count):
+            return [self for _ in range(count)]
+
+        def selectbox(self, _label, options, key):
+            return options[0]
+
+        def plotly_chart(self, _fig, width):
+            self.chart_count += 1
+
+        def caption(self, _text):
+            pass
+
+    class FakeContainer:
+        def __init__(self):
+            self.tabs_requested = []
+            self.created_tabs = []
+
+        def tabs(self, labels):
+            self.tabs_requested = labels
+            self.created_tabs = [FakeTab() for _ in labels]
+            return self.created_tabs
+
+    records = [
+        {
+            "Product": "Pinecone Serverless",
+            "Search Mode": "Integer Filter",
+            "Filter": "50%",
+            "Payload": "IDs Only",
+            "Tenant Count": 1000,
+            "Top K": 50,
+            "Concurrency": "c4",
+            "Best Concurrency": 4,
+            "Max QPS": 120.0,
+            "P95 Latency (s)": 0.10,
+            "P99 Latency (s)": 0.20,
+        },
+        {
+            "Product": "Zilliz Cloud Capacity 2CU",
+            "Search Mode": "Integer Filter",
+            "Filter": "50%",
+            "Payload": "IDs Only",
+            "Tenant Count": 1000,
+            "Top K": 50,
+            "Concurrency": "c60,c80",
+            "Best Concurrency": 80,
+            "Max QPS": 240.0,
+            "P95 Latency (s)": 0.05,
+            "P99 Latency (s)": 0.10,
+        },
+    ]
+    fake = FakeContainer()
+
+    _draw_charts_by_search_mode(fake, records)
+
+    assert fake.tabs_requested == ["Integer Filter"]
+    assert fake.created_tabs[0].chart_count == 2
 
 
 def test_cloud_multi_tenant_search_sidebar_copy_names_the_case_not_whole_leaderboard():

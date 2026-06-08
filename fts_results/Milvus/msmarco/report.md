@@ -256,13 +256,13 @@ Effective Milvus FTS case config from the raw JSON:
 
 ## Result
 
-| Raw JSON | Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260528_fts-e2e-milvus-msmarco-small_milvus.json` | `fts-e2e-milvus-msmarco-small` | 100K | 248.2907 | 999.1071 | 0.9157 | 0.7157 | 0.6653 | 0.0099 | 0.0150 | 260.7754 / 357.2333 / 730.4332 / 999.1071 |
-| `result_20260601_fts-e2e-milvus-msmarco-small_milvus.json` | `fts-e2e-milvus-msmarco-small` | 100K | 227.1237 | 4098.1460 | 0.9157 | 0.7157 | 0.6653 | 0.0022 | 0.0027 | 567.2801 / 2331.7462 / 3494.7072 / 4098.1460 |
-| `result_20260601_fts-e2e-milvus-msmarco-small-stability_milvus.json` | `fts-e2e-milvus-msmarco-small-stability` | 100K | 233.5157 | 4135.7169 | 0.9157 | 0.7157 | 0.6653 | 0.0022 | 0.0027 | 566.9304 / 2317.6759 / 3526.9488 / 4135.7169 |
-| `result_20260602_fts-e2e-milvus-msmarco-small-r7i_milvus.json` | `fts-e2e-milvus-msmarco-small-r7i` | 100K | 230.3305 | 9359.8351 | 0.9157 | 0.7157 | 0.6653 | 0.0026 | 0.0029 | 528.3714 / 3129.5306 / 5750.1304 / 9359.8351 |
-| `result_20260602_fts-e2e-milvus-msmarco-medium-r7i_milvus.json` | `fts-e2e-milvus-msmarco-medium-r7i` | 1M | 2042.1265 | 3857.7069 | 0.8048 | 0.5174 | 0.4458 | 0.0056 | 0.0074 | 284.4606 / 1608.7846 / 2858.1176 / 3857.7069 |
+| Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fts-e2e-milvus-msmarco-small` | 100K | 248.2907 | 999.1071 | 0.9157 | 0.7157 | 0.6653 | 0.0099 | 0.0150 | 260.7754 / 357.2333 / 730.4332 / 999.1071 |
+| `fts-e2e-milvus-msmarco-small` | 100K | 227.1237 | 4098.1460 | 0.9157 | 0.7157 | 0.6653 | 0.0022 | 0.0027 | 567.2801 / 2331.7462 / 3494.7072 / 4098.1460 |
+| `fts-e2e-milvus-msmarco-small-stability` | 100K | 233.5157 | 4135.7169 | 0.9157 | 0.7157 | 0.6653 | 0.0022 | 0.0027 | 566.9304 / 2317.6759 / 3526.9488 / 4135.7169 |
+| `fts-e2e-milvus-msmarco-small-r7i` | 100K | 230.3305 | 9359.8351 | 0.9157 | 0.7157 | 0.6653 | 0.0026 | 0.0029 | 528.3714 / 3129.5306 / 5750.1304 / 9359.8351 |
+| `fts-e2e-milvus-msmarco-medium-r7i` | 1M | 2042.1265 | 3857.7069 | 0.8048 | 0.5174 | 0.4458 | 0.0056 | 0.0074 | 284.4606 / 1608.7846 / 2858.1176 / 3857.7069 |
 
 Latest `r7i.4xlarge` rerun vs previous `m5d.2xlarge` stability run:
 
@@ -273,9 +273,9 @@ Latest `r7i.4xlarge` rerun vs previous `m5d.2xlarge` stability run:
 
 MS MARCO Small text payload rerun on `r7i.4xlarge`:
 
-| Raw JSON | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260603_fts-e2e-milvus-msmarco-small-text-r7i-rerun_milvus.json` | `fts-e2e-milvus-msmarco-small-text-r7i-rerun` | 230.4392 | 9569.0676 | 0.9157 | 0.7157 | 0.6653 | 0.0029 | 0.0032 | 468.2255 / 4857.3898 / 8011.723 / 9279.3577 / 9569.0676 / 9266.8844 |
+| Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fts-e2e-milvus-msmarco-small-text-r7i-rerun` | 230.4392 | 9569.0676 | 0.9157 | 0.7157 | 0.6653 | 0.0029 | 0.0032 | 468.2255 / 4857.3898 / 8011.723 / 9279.3577 / 9569.0676 / 9266.8844 |
 
 Text payload details:
 
@@ -285,10 +285,10 @@ Text payload details:
 
 MS MARCO Medium six-concurrency rerun on `r7i.4xlarge`:
 
-| Raw JSON | Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260604_fts-msmarco-medium-milvus-ids-c1-10-20-40-60-80-r7i-20260604T041648Z_milvus.json` | `ids_only` | `fts-msmarco-medium-milvus-ids-c1-10-20-40-60-80-r7i-20260604T041648Z` | 2048.1231 | 5139.5920 | 0.8048 | 0.5174 | 0.4458 | 0.0053 | 0.0071 | 433.1311 / 2976.3670 / 3973.3733 / 4750.5123 / 5053.7822 / 5139.5920 |
-| `result_20260604_fts-msmarco-medium-milvus-text-c1-10-20-40-60-80-r7i-20260604T041648Z_milvus.json` | `text` | `fts-msmarco-medium-milvus-text-c1-10-20-40-60-80-r7i-20260604T041648Z` | 2048.2360 | 4677.4078 | 0.8048 | 0.5174 | 0.4458 | 0.0057 | 0.0075 | 378.3115 / 2732.7863 / 3656.8277 / 4353.0352 / 4602.9011 / 4677.4078 |
+| Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ids_only` | `fts-msmarco-medium-milvus-ids-c1-10-20-40-60-80-r7i-20260604T041648Z` | 2048.1231 | 5139.5920 | 0.8048 | 0.5174 | 0.4458 | 0.0053 | 0.0071 | 433.1311 / 2976.3670 / 3973.3733 / 4750.5123 / 5053.7822 / 5139.5920 |
+| `text` | `fts-msmarco-medium-milvus-text-c1-10-20-40-60-80-r7i-20260604T041648Z` | 2048.2360 | 4677.4078 | 0.8048 | 0.5174 | 0.4458 | 0.0057 | 0.0075 | 378.3115 / 2732.7863 / 3656.8277 / 4353.0352 / 4602.9011 / 4677.4078 |
 
 MS MARCO Medium stability comparison against the previous `r7i.4xlarge` ids-only run:
 
@@ -300,10 +300,10 @@ MS MARCO Medium stability comparison against the previous `r7i.4xlarge` ids-only
 
 MS MARCO Large six-concurrency run on `r7i.4xlarge`:
 
-| Raw JSON | Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260604_fts-msmarco-large-milvus-ids-c1-10-20-40-60-80-r7i-20260604T113624Z_milvus.json` | `ids_only` | `fts-msmarco-large-milvus-ids-c1-10-20-40-60-80-r7i-20260604T113624Z` | 17874.1539 | 738.2857 | 0.6206 | 0.2695 | 0.1824 | 0.0091 | 0.0133 | 203.7730 / 701.5716 / 707.9453 / 722.6776 / 735.3773 / 738.2857 |
-| `result_20260604_fts-msmarco-large-milvus-text-c1-10-20-40-60-80-r7i-20260604T113624Z_milvus.json` | `text` | `fts-msmarco-large-milvus-text-c1-10-20-40-60-80-r7i-20260604T113624Z` | 17864.1118 | 743.7173 | 0.6206 | 0.2695 | 0.1824 | 0.0099 | 0.0140 | 189.9733 / 700.0473 / 692.9175 / 730.2865 / 735.8742 / 743.7173 |
+| Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ids_only` | `fts-msmarco-large-milvus-ids-c1-10-20-40-60-80-r7i-20260604T113624Z` | 17874.1539 | 738.2857 | 0.6206 | 0.2695 | 0.1824 | 0.0091 | 0.0133 | 203.7730 / 701.5716 / 707.9453 / 722.6776 / 735.3773 / 738.2857 |
+| `text` | `fts-msmarco-large-milvus-text-c1-10-20-40-60-80-r7i-20260604T113624Z` | 17864.1118 | 743.7173 | 0.6206 | 0.2695 | 0.1824 | 0.0099 | 0.0140 | 189.9733 / 700.0473 / 692.9175 / 730.2865 / 735.8742 / 743.7173 |
 
 MS MARCO Large observations:
 

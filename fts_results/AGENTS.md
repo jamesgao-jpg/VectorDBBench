@@ -63,8 +63,10 @@ are updated together.
   historical report commands unchanged when documenting already-committed raw
   results.
 - `Result`: include a Markdown table summarizing every committed raw result in
-  `raw_results/`. At minimum include raw JSON filename, task label, dataset
-  size, load duration, QPS, recall, NDCG, MRR, p95, p99, and concurrent QPS.
+  `raw_results/`. At minimum include task label, dataset size, load duration,
+  QPS, recall, NDCG, MRR, p95, p99, and concurrent QPS. Do not add a standalone
+  `Raw JSON` column to result tables; keep raw file references in the
+  prerequisites or surrounding notes so the comparison tables stay readable.
 
 ## Safety
 

@@ -99,7 +99,7 @@ Effective TurboPuffer FTS case config from the full 2026-06-01 raw JSON:
 
 ## Result
 
-| Raw JSON | Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260528_fts-e2e-tpuf-msmarco-small-searchonly_turbopuffer.json` | `fts-e2e-tpuf-msmarco-small-searchonly` | 100K | 0.0000 | 146.5862 | 0.9000 | 0.6860 | 0.6322 | 0.1869 | 0.2280 | 8.2367 / 35.5999 / 72.4753 / 146.5862 |
-| `result_20260601_fts-e2e-tpuf-msmarco-small_turbopuffer.json` | `fts-e2e-tpuf-msmarco-small` | 100K | 290.5625 | 257.3771 | 0.9125 | 0.7156 | 0.6659 | 0.0840 | 0.1081 | 1.3357 / 49.4967 / 126.8548 / 257.3771 |
+| Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fts-e2e-tpuf-msmarco-small-searchonly` | 100K | 0.0000 | 146.5862 | 0.9000 | 0.6860 | 0.6322 | 0.1869 | 0.2280 | 8.2367 / 35.5999 / 72.4753 / 146.5862 |
+| `fts-e2e-tpuf-msmarco-small` | 100K | 290.5625 | 257.3771 | 0.9125 | 0.7156 | 0.6659 | 0.0840 | 0.1081 | 1.3357 / 49.4967 / 126.8548 / 257.3771 |

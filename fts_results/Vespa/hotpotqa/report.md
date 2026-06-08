@@ -181,9 +181,9 @@ Effective Vespa FTS case config from the raw JSON: no backend-specific case fiel
 
 Historical note: the text-payload matrix run `fts-matrix-vespa-hotpotqa-medium-text-c20-40-80-r7i-20260603T061706Z` is intentionally excluded from the result table because VDBBench emitted only a zero-metric failure placeholder JSON. Log evidence shows the run loaded successfully (`load_duration=580.4292s`) and completed concurrency 20 (`72.8836 QPS`), then hung during concurrency 40 with repeated Vespa `Summary data is incomplete` timeout warnings and was terminated with `RUN_FAILED_143`. The 2026-06-04 full six-concurrency text-payload rerun below completed successfully, though Vespa still emitted timeout warnings during concurrency 60 and 80.
 
-| Raw JSON | Task label | Dataset size | Payload | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
-|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| `result_20260602_fts-e2e-vespa-hotpotqa-medium-r7i_vespa.json` | `fts-e2e-vespa-hotpotqa-medium-r7i` | 1M | ids_only | 575.5304 | 80.0872 | 0.8309 | 0.7208 | 0.8500 | 0.2647 | 0.3261 | 1/5/10/20 | 6.4907 / 33.8533 / 57.9060 / 80.0872 |
-| `result_20260604_fts-hotpotqa-medium-vespa-ids-c1-10-20-40-60-80-r7i-20260604T074646Z_vespa.json` | `fts-hotpotqa-medium-vespa-ids-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | ids_only | 579.2518 | 181.5240 | 0.8309 | 0.7208 | 0.8500 | 0.2628 | 0.3223 | 1/10/20/40/60/80 | 6.6652 / 58.1128 / 81.3796 / 104.5544 / 140.9124 / 181.5240 |
-| `result_20260604_fts-hotpotqa-medium-vespa-text-c1-10-20-40-60-80-r7i-20260604T074646Z_vespa.json` | `fts-hotpotqa-medium-vespa-text-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | text | 579.3951 | 177.2947 | 0.8309 | 0.7208 | 0.8500 | 0.2683 | 0.3313 | 1/10/20/40/60/80 | 5.2029 / 55.8888 / 79.5598 / 100.9787 / 138.3337 / 177.2947 |
-| `result_20260602_fts-e2e-vespa-hotpotqa-large-r7i_vespa.json` | `fts-e2e-vespa-hotpotqa-large-r7i` | 5.2M | ids_only | 2954.2589 | 46.3472 | 0.6754 | 0.5460 | 0.6640 | 0.4460 | 0.4465 | 1/5/10/20 | 3.3531 / 13.1559 / 24.4787 / 46.3472 |
+| Task label | Dataset size | Payload | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `fts-e2e-vespa-hotpotqa-medium-r7i` | 1M | ids_only | 575.5304 | 80.0872 | 0.8309 | 0.7208 | 0.8500 | 0.2647 | 0.3261 | 1/5/10/20 | 6.4907 / 33.8533 / 57.9060 / 80.0872 |
+| `fts-hotpotqa-medium-vespa-ids-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | ids_only | 579.2518 | 181.5240 | 0.8309 | 0.7208 | 0.8500 | 0.2628 | 0.3223 | 1/10/20/40/60/80 | 6.6652 / 58.1128 / 81.3796 / 104.5544 / 140.9124 / 181.5240 |
+| `fts-hotpotqa-medium-vespa-text-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | text | 579.3951 | 177.2947 | 0.8309 | 0.7208 | 0.8500 | 0.2683 | 0.3313 | 1/10/20/40/60/80 | 5.2029 / 55.8888 / 79.5598 / 100.9787 / 138.3337 / 177.2947 |
+| `fts-e2e-vespa-hotpotqa-large-r7i` | 5.2M | ids_only | 2954.2589 | 46.3472 | 0.6754 | 0.5460 | 0.6640 | 0.4460 | 0.4465 | 1/5/10/20 | 3.3531 / 13.1559 / 24.4787 / 46.3472 |

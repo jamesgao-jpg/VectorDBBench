@@ -248,12 +248,12 @@ Effective Vespa FTS case config from the raw JSON: no backend-specific case fiel
 
 ## Result
 
-| Raw JSON | Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260528_fts-e2e-vespa-msmarco-small_vespa.json` | `fts-e2e-vespa-msmarco-small` | 100K | 171.9693 | 478.5384 | 0.9416 | 0.7509 | 0.7015 | 0.0212 | 0.0269 | 63.4393 / 146.3972 / 428.5583 / 478.5384 |
-| `result_20260601_fts-e2e-vespa-msmarco-small_vespa.json` | `fts-e2e-vespa-msmarco-small` | 100K | 81.6402 | 482.1899 | 0.9416 | 0.7509 | 0.7015 | 0.0202 | 0.0260 | 78.8898 / 336.8178 / 482.1899 / 470.0384 |
-| `result_20260602_fts-e2e-vespa-msmarco-small-r7i_vespa.json` | `fts-e2e-vespa-msmarco-small-r7i` | 100K | 79.2473 | 734.5241 | 0.9416 | 0.7509 | 0.7015 | 0.0184 | 0.0230 | 91.7244 / 512.5352 / 347.9730 / 734.5241 |
-| `result_20260602_fts-e2e-vespa-msmarco-medium-r7i_vespa.json` | `fts-e2e-vespa-msmarco-medium-r7i` | 1M | 585.7496 | 196.8213 | 0.8409 | 0.5499 | 0.4767 | 0.1268 | 0.1744 | 17.3137 / 85.2530 / 139.2205 / 196.8213 |
+| Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fts-e2e-vespa-msmarco-small` | 100K | 171.9693 | 478.5384 | 0.9416 | 0.7509 | 0.7015 | 0.0212 | 0.0269 | 63.4393 / 146.3972 / 428.5583 / 478.5384 |
+| `fts-e2e-vespa-msmarco-small` | 100K | 81.6402 | 482.1899 | 0.9416 | 0.7509 | 0.7015 | 0.0202 | 0.0260 | 78.8898 / 336.8178 / 482.1899 / 470.0384 |
+| `fts-e2e-vespa-msmarco-small-r7i` | 100K | 79.2473 | 734.5241 | 0.9416 | 0.7509 | 0.7015 | 0.0184 | 0.0230 | 91.7244 / 512.5352 / 347.9730 / 734.5241 |
+| `fts-e2e-vespa-msmarco-medium-r7i` | 1M | 585.7496 | 196.8213 | 0.8409 | 0.5499 | 0.4767 | 0.1268 | 0.1744 | 17.3137 / 85.2530 / 139.2205 / 196.8213 |
 
 Latest `r7i.4xlarge` rerun vs previous `m5d.2xlarge` run:
 
@@ -264,9 +264,9 @@ Latest `r7i.4xlarge` rerun vs previous `m5d.2xlarge` run:
 
 MS MARCO Small text payload rerun on `r7i.4xlarge`:
 
-| Raw JSON | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260603_fts-e2e-vespa-msmarco-small-text-r7i_vespa.json` | `fts-e2e-vespa-msmarco-small-text-r7i` | 78.8999 | 788.0555 | 0.9416 | 0.7509 | 0.7015 | 0.0193 | 0.0236 | 64.6508 / 786.3064 / 131.0499 / 788.0555 / 422.9538 / 365.3142 |
+| Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fts-e2e-vespa-msmarco-small-text-r7i` | 78.8999 | 788.0555 | 0.9416 | 0.7509 | 0.7015 | 0.0193 | 0.0236 | 64.6508 / 786.3064 / 131.0499 / 788.0555 / 422.9538 / 365.3142 |
 
 Text payload details:
 
@@ -277,10 +277,10 @@ Text payload details:
 
 MS MARCO Medium six-concurrency rerun on `r7i.4xlarge`:
 
-| Raw JSON | Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260604_fts-msmarco-medium-vespa-ids-c1-10-20-40-60-80-r7i-20260604T041648Z_vespa.json` | `ids_only` | `fts-msmarco-medium-vespa-ids-c1-10-20-40-60-80-r7i-20260604T041648Z` | 581.5774 | 257.0647 | 0.8409 | 0.5499 | 0.4767 | 0.1231 | 0.1688 | 17.2619 / 153.1753 / 217.6157 / 230.2074 / 238.9556 / 257.0647 |
-| `result_20260604_fts-msmarco-medium-vespa-text-c1-10-20-40-60-80-r7i-20260604T041648Z_vespa.json` | `text` | `fts-msmarco-medium-vespa-text-c1-10-20-40-60-80-r7i-20260604T041648Z` | 581.4244 | 251.4636 | 0.8409 | 0.5499 | 0.4767 | 0.1248 | 0.1702 | 15.0937 / 133.4407 / 199.3716 / 209.5499 / 234.2022 / 251.4636 |
+| Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ids_only` | `fts-msmarco-medium-vespa-ids-c1-10-20-40-60-80-r7i-20260604T041648Z` | 581.5774 | 257.0647 | 0.8409 | 0.5499 | 0.4767 | 0.1231 | 0.1688 | 17.2619 / 153.1753 / 217.6157 / 230.2074 / 238.9556 / 257.0647 |
+| `text` | `fts-msmarco-medium-vespa-text-c1-10-20-40-60-80-r7i-20260604T041648Z` | 581.4244 | 251.4636 | 0.8409 | 0.5499 | 0.4767 | 0.1248 | 0.1702 | 15.0937 / 133.4407 / 199.3716 / 209.5499 / 234.2022 / 251.4636 |
 
 MS MARCO Medium stability comparison against the previous `r7i.4xlarge` ids-only run:
 
@@ -292,10 +292,10 @@ MS MARCO Medium stability comparison against the previous `r7i.4xlarge` ids-only
 
 MS MARCO Large six-concurrency run on `r7i.4xlarge`:
 
-| Raw JSON | Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260605_fts-msmarco-large-vespa-ids-c1-10-20-40-60-80-r7i-20260604T113624Z_vespa.json` | `ids_only` | `fts-msmarco-large-vespa-ids-c1-10-20-40-60-80-r7i-20260604T113624Z` | 4987.2328 | 192.5008 | 0.5689 | 0.2475 | 0.1673 | 0.4454 | 0.4460 | 4.1287 / 30.7389 / 56.8053 / 103.6033 / 149.3731 / 192.5008 |
-| `result_20260605_fts-msmarco-large-vespa-text-c1-10-20-40-60-80-r7i-20260604T113624Z_vespa.json` | `text` | `fts-msmarco-large-vespa-text-c1-10-20-40-60-80-r7i-20260604T113624Z` | 4989.0550 | 187.5886 | 0.5687 | 0.2475 | 0.1674 | 0.4525 | 0.4537 | 3.3315 / 22.3210 / 53.0334 / 100.4980 / 140.6589 / 187.5886 |
+| Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ids_only` | `fts-msmarco-large-vespa-ids-c1-10-20-40-60-80-r7i-20260604T113624Z` | 4987.2328 | 192.5008 | 0.5689 | 0.2475 | 0.1673 | 0.4454 | 0.4460 | 4.1287 / 30.7389 / 56.8053 / 103.6033 / 149.3731 / 192.5008 |
+| `text` | `fts-msmarco-large-vespa-text-c1-10-20-40-60-80-r7i-20260604T113624Z` | 4989.0550 | 187.5886 | 0.5687 | 0.2475 | 0.1674 | 0.4525 | 0.4537 | 3.3315 / 22.3210 / 53.0334 / 100.4980 / 140.6589 / 187.5886 |
 
 MS MARCO Large observations:
 

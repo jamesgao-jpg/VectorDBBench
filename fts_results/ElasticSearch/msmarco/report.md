@@ -254,13 +254,13 @@ Effective Elasticsearch FTS case config from the raw JSON:
 
 ## Result
 
-| Raw JSON | Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260528_fts-e2e-elastic-msmarco-small_elasticcloud.json` | `fts-e2e-elastic-msmarco-small` | 100K | 72.4312 | 1227.3373 | 0.9116 | 0.7159 | 0.6665 | 0.0050 | 0.0098 | 143.5116 / 365.3610 / 672.9976 / 1227.3373 |
-| `result_20260601_fts-e2e-elastic-msmarco-small_elasticcloud.json` | `fts-e2e-elastic-msmarco-small` | 100K | 59.2031 | 3100.5973 | 0.9118 | 0.7159 | 0.6665 | 0.0031 | 0.0040 | 422.7782 / 1967.8125 / 2861.4449 / 3100.5973 |
-| `result_20260601_fts-e2e-elastic-msmarco-small-stability_elasticcloud.json` | `fts-e2e-elastic-msmarco-small-stability` | 100K | 58.9212 | 3113.2707 | 0.9118 | 0.7159 | 0.6665 | 0.0031 | 0.0039 | 416.5153 / 1991.3322 / 2823.6226 / 3113.2707 |
-| `result_20260602_fts-e2e-elastic-msmarco-small-r7i_elasticcloud.json` | `fts-e2e-elastic-msmarco-small-r7i` | 100K | 59.4276 | 8689.3499 | 0.9118 | 0.7159 | 0.6665 | 0.0030 | 0.0035 | 396.5015 / 2534.0129 / 5536.5659 / 8689.3499 |
-| `result_20260602_fts-e2e-elastic-msmarco-medium-r7i_elasticcloud.json` | `fts-e2e-elastic-msmarco-medium-r7i` | 1M | 148.5277 | 3986.3734 | 0.8028 | 0.5222 | 0.4526 | 0.0065 | 0.0089 | 240.5419 / 1348.5987 / 2719.8093 / 3986.3734 |
+| Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fts-e2e-elastic-msmarco-small` | 100K | 72.4312 | 1227.3373 | 0.9116 | 0.7159 | 0.6665 | 0.0050 | 0.0098 | 143.5116 / 365.3610 / 672.9976 / 1227.3373 |
+| `fts-e2e-elastic-msmarco-small` | 100K | 59.2031 | 3100.5973 | 0.9118 | 0.7159 | 0.6665 | 0.0031 | 0.0040 | 422.7782 / 1967.8125 / 2861.4449 / 3100.5973 |
+| `fts-e2e-elastic-msmarco-small-stability` | 100K | 58.9212 | 3113.2707 | 0.9118 | 0.7159 | 0.6665 | 0.0031 | 0.0039 | 416.5153 / 1991.3322 / 2823.6226 / 3113.2707 |
+| `fts-e2e-elastic-msmarco-small-r7i` | 100K | 59.4276 | 8689.3499 | 0.9118 | 0.7159 | 0.6665 | 0.0030 | 0.0035 | 396.5015 / 2534.0129 / 5536.5659 / 8689.3499 |
+| `fts-e2e-elastic-msmarco-medium-r7i` | 1M | 148.5277 | 3986.3734 | 0.8028 | 0.5222 | 0.4526 | 0.0065 | 0.0089 | 240.5419 / 1348.5987 / 2719.8093 / 3986.3734 |
 
 Latest `r7i.4xlarge` rerun vs previous `m5d.2xlarge` stability run:
 
@@ -271,9 +271,9 @@ Latest `r7i.4xlarge` rerun vs previous `m5d.2xlarge` stability run:
 
 MS MARCO Small text payload rerun on `r7i.4xlarge`:
 
-| Raw JSON | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260603_fts-e2e-elastic-msmarco-small-text-r7i_elasticcloud.json` | `fts-e2e-elastic-msmarco-small-text-r7i` | 57.8052 | 4177.1357 | 0.9118 | 0.7159 | 0.6665 | 0.0046 | 0.0051 | 242.0833 / 2599.9459 / 3941.7042 / 4158.8964 / 4177.1357 / 4155.8592 |
+| Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `fts-e2e-elastic-msmarco-small-text-r7i` | 57.8052 | 4177.1357 | 0.9118 | 0.7159 | 0.6665 | 0.0046 | 0.0051 | 242.0833 / 2599.9459 / 3941.7042 / 4158.8964 / 4177.1357 / 4155.8592 |
 
 Text payload details:
 
@@ -283,10 +283,10 @@ Text payload details:
 
 MS MARCO Medium six-concurrency rerun on `r7i.4xlarge`:
 
-| Raw JSON | Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260604_fts-msmarco-medium-elastic-ids-c1-10-20-40-60-80-r7i-20260604T041648Z_elasticcloud.json` | `ids_only` | `fts-msmarco-medium-elastic-ids-c1-10-20-40-60-80-r7i-20260604T041648Z` | 140.1544 | 4473.8674 | 0.8028 | 0.5222 | 0.4526 | 0.0063 | 0.0086 | 260.6360 / 2883.9739 / 4166.7860 / 4405.5505 / 4473.8674 / 4458.2345 |
-| `result_20260604_fts-msmarco-medium-elastic-text-c1-10-20-40-60-80-r7i-20260604T041648Z_elasticcloud.json` | `text` | `fts-msmarco-medium-elastic-text-c1-10-20-40-60-80-r7i-20260604T041648Z` | 139.6663 | 2696.5048 | 0.8028 | 0.5222 | 0.4526 | 0.0079 | 0.0101 | 178.1539 / 1787.4005 / 2605.4203 / 2688.4985 / 2680.9282 / 2696.5048 |
+| Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ids_only` | `fts-msmarco-medium-elastic-ids-c1-10-20-40-60-80-r7i-20260604T041648Z` | 140.1544 | 4473.8674 | 0.8028 | 0.5222 | 0.4526 | 0.0063 | 0.0086 | 260.6360 / 2883.9739 / 4166.7860 / 4405.5505 / 4473.8674 / 4458.2345 |
+| `text` | `fts-msmarco-medium-elastic-text-c1-10-20-40-60-80-r7i-20260604T041648Z` | 139.6663 | 2696.5048 | 0.8028 | 0.5222 | 0.4526 | 0.0079 | 0.0101 | 178.1539 / 1787.4005 / 2605.4203 / 2688.4985 / 2680.9282 / 2696.5048 |
 
 MS MARCO Medium stability comparison against the previous `r7i.4xlarge` ids-only run:
 
@@ -298,10 +298,10 @@ MS MARCO Medium stability comparison against the previous `r7i.4xlarge` ids-only
 
 MS MARCO Large six-concurrency run on `r7i.4xlarge`:
 
-| Raw JSON | Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `result_20260604_fts-msmarco-large-elastic-ids-c1-10-20-40-60-80-r7i-20260604T113624Z_elasticcloud.json` | `ids_only` | `fts-msmarco-large-elastic-ids-c1-10-20-40-60-80-r7i-20260604T113624Z` | 991.9284 | 1279.2869 | 0.6230 | 0.2733 | 0.1862 | 0.0243 | 0.0389 | 92.4571 / 899.7783 / 1217.7168 / 1279.2869 / 1240.2423 / 1202.4733 |
-| `result_20260604_fts-msmarco-large-elastic-text-c1-10-20-40-60-80-r7i-20260604T113624Z_elasticcloud.json` | `text` | `fts-msmarco-large-elastic-text-c1-10-20-40-60-80-r7i-20260604T113624Z` | 966.5160 | 952.0335 | 0.6230 | 0.2733 | 0.1862 | 0.0278 | 0.0432 | 11.7464 / 311.8365 / 942.3865 / 952.0335 / 947.4759 / 921.7487 |
+| Payload | Task label | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/10/20/40/60/80 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ids_only` | `fts-msmarco-large-elastic-ids-c1-10-20-40-60-80-r7i-20260604T113624Z` | 991.9284 | 1279.2869 | 0.6230 | 0.2733 | 0.1862 | 0.0243 | 0.0389 | 92.4571 / 899.7783 / 1217.7168 / 1279.2869 / 1240.2423 / 1202.4733 |
+| `text` | `fts-msmarco-large-elastic-text-c1-10-20-40-60-80-r7i-20260604T113624Z` | 966.5160 | 952.0335 | 0.6230 | 0.2733 | 0.1862 | 0.0278 | 0.0432 | 11.7464 / 311.8365 / 942.3865 / 952.0335 / 947.4759 / 921.7487 |
 
 MS MARCO Large observations:
 

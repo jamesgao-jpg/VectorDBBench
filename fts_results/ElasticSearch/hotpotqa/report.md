@@ -211,10 +211,10 @@ Effective Elasticsearch FTS case config from the raw JSON:
 
 The ids-only matrix run `fts-matrix-elastic-hotpotqa-large-ids-c20-40-80-r7i-20260603T061706Z` is intentionally excluded from the result table because VDBBench emitted only a zero-metric failure placeholder JSON. Log evidence shows the run loaded successfully (`load_duration=545.7043s`) and completed concurrency 20/40 (`447.5993 / 480.0184 QPS`), but the parent process hung after starting concurrency 80 and was terminated with `RUN_FAILED_143`.
 
-| Raw JSON | Task label | Dataset size | Payload | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
-|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| `result_20260602_fts-e2e-elastic-hotpotqa-medium-r7i_elasticcloud.json` | `fts-e2e-elastic-hotpotqa-medium-r7i` | 1M | ids_only | 142.0589 | 1410.3787 | 0.8378 | 0.7287 | 0.8598 | 0.0159 | 0.0224 | 1/5/10/20 | 111.5252 / 558.2304 / 1034.1176 / 1410.3787 |
-| `result_20260604_fts-hotpotqa-medium-elastic-ids-c1-10-20-40-60-80-r7i-20260604T074646Z_elasticcloud.json` | `fts-hotpotqa-medium-elastic-ids-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | ids_only | 139.2256 | 1581.7165 | 0.8378 | 0.7287 | 0.8598 | 0.0150 | 0.0212 | 1/10/20/40/60/80 | 119.3122 / 1106.0982 / 1552.4142 / 1581.7165 / 1574.0491 / 1579.6451 |
-| `result_20260604_fts-hotpotqa-medium-elastic-text-c1-10-20-40-60-80-r7i-20260604T074646Z_elasticcloud.json` | `fts-hotpotqa-medium-elastic-text-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | text | 140.1574 | 1238.7840 | 0.8378 | 0.7287 | 0.8598 | 0.0171 | 0.0237 | 1/10/20/40/60/80 | 94.8516 / 870.2786 / 1203.6183 / 1230.3996 / 1238.7840 / 1229.2721 |
-| `result_20260602_fts-e2e-elastic-hotpotqa-large-r7i_elasticcloud.json` | `fts-e2e-elastic-hotpotqa-large-r7i` | 5.2M | ids_only | 550.6164 | 476.2610 | 0.7637 | 0.6243 | 0.7549 | 0.0503 | 0.0755 | 1/5/10/20 | 41.0129 / 202.7703 / 356.3845 / 476.2610 |
-| `result_20260604_fts-matrix-elastic-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z_elasticcloud.json` | `fts-matrix-elastic-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z` | 5.2M | text | 554.4492 | 435.1027 | 0.7637 | 0.6243 | 0.7549 | 0.0518 | 0.0766 | 20/40/80 | 402.3090 / 435.1027 / 434.3993 |
+| Task label | Dataset size | Payload | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `fts-e2e-elastic-hotpotqa-medium-r7i` | 1M | ids_only | 142.0589 | 1410.3787 | 0.8378 | 0.7287 | 0.8598 | 0.0159 | 0.0224 | 1/5/10/20 | 111.5252 / 558.2304 / 1034.1176 / 1410.3787 |
+| `fts-hotpotqa-medium-elastic-ids-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | ids_only | 139.2256 | 1581.7165 | 0.8378 | 0.7287 | 0.8598 | 0.0150 | 0.0212 | 1/10/20/40/60/80 | 119.3122 / 1106.0982 / 1552.4142 / 1581.7165 / 1574.0491 / 1579.6451 |
+| `fts-hotpotqa-medium-elastic-text-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | text | 140.1574 | 1238.7840 | 0.8378 | 0.7287 | 0.8598 | 0.0171 | 0.0237 | 1/10/20/40/60/80 | 94.8516 / 870.2786 / 1203.6183 / 1230.3996 / 1238.7840 / 1229.2721 |
+| `fts-e2e-elastic-hotpotqa-large-r7i` | 5.2M | ids_only | 550.6164 | 476.2610 | 0.7637 | 0.6243 | 0.7549 | 0.0503 | 0.0755 | 1/5/10/20 | 41.0129 / 202.7703 / 356.3845 / 476.2610 |
+| `fts-matrix-elastic-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z` | 5.2M | text | 554.4492 | 435.1027 | 0.7637 | 0.6243 | 0.7549 | 0.0518 | 0.0766 | 20/40/80 | 402.3090 / 435.1027 / 434.3993 |

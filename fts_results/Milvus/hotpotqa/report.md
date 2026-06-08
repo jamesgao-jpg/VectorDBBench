@@ -224,11 +224,11 @@ Effective Milvus FTS case config from the raw JSON:
 
 ## Result
 
-| Raw JSON | Task label | Dataset size | Payload | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
-|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| `result_20260602_fts-e2e-milvus-hotpotqa-medium-r7i_milvus.json` | `fts-e2e-milvus-hotpotqa-medium-r7i` | 1M | ids_only | 2031.2796 | 1596.6340 | 0.8378 | 0.7246 | 0.8561 | 0.0123 | 0.0170 | 1/5/10/20 | 146.0629 / 726.2209 / 1273.3380 / 1596.6340 |
-| `result_20260604_fts-hotpotqa-medium-milvus-ids-c1-10-20-40-60-80-r7i-20260604T074646Z_milvus.json` | `fts-hotpotqa-medium-milvus-ids-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | ids_only | 2040.9336 | 1865.4681 | 0.8378 | 0.7246 | 0.8561 | 0.0122 | 0.0170 | 1/10/20/40/60/80 | 255.0087 / 1364.3522 / 1378.9975 / 1702.7745 / 1851.3955 / 1865.4681 |
-| `result_20260604_fts-hotpotqa-medium-milvus-text-c1-10-20-40-60-80-r7i-20260604T074646Z_milvus.json` | `fts-hotpotqa-medium-milvus-text-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | text | 2033.2594 | 1714.0357 | 0.8378 | 0.7246 | 0.8561 | 0.0124 | 0.0170 | 1/10/20/40/60/80 | 223.9828 / 1224.1637 / 1558.9074 / 1669.1467 / 1687.2785 / 1714.0357 |
-| `result_20260602_fts-e2e-milvus-hotpotqa-large-r7i_milvus.json` | `fts-e2e-milvus-hotpotqa-large-r7i` | 5.2M | ids_only | 10583.8485 | 394.4417 | 0.7573 | 0.6129 | 0.7410 | 0.0212 | 0.0299 | 1/5/10/20 | 88.1695 / 336.8579 / 388.2553 / 394.4417 |
-| `result_20260603_fts-matrix-milvus-hotpotqa-large-ids-c20-40-80-r7i-20260603T061706Z_milvus.json` | `fts-matrix-milvus-hotpotqa-large-ids-c20-40-80-r7i-20260603T061706Z` | 5.2M | ids_only | 10583.8402 | 411.7323 | 0.7573 | 0.6129 | 0.7410 | 0.0211 | 0.0305 | 20/40/80 | 400.7550 / 407.1847 / 411.7323 |
-| `result_20260603_fts-matrix-milvus-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z_milvus.json` | `fts-matrix-milvus-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z` | 5.2M | text | 10583.7873 | 409.4366 | 0.7573 | 0.6129 | 0.7410 | 0.0214 | 0.0308 | 20/40/80 | 395.3148 / 407.5527 / 409.4366 |
+| Task label | Dataset size | Payload | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `fts-e2e-milvus-hotpotqa-medium-r7i` | 1M | ids_only | 2031.2796 | 1596.6340 | 0.8378 | 0.7246 | 0.8561 | 0.0123 | 0.0170 | 1/5/10/20 | 146.0629 / 726.2209 / 1273.3380 / 1596.6340 |
+| `fts-hotpotqa-medium-milvus-ids-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | ids_only | 2040.9336 | 1865.4681 | 0.8378 | 0.7246 | 0.8561 | 0.0122 | 0.0170 | 1/10/20/40/60/80 | 255.0087 / 1364.3522 / 1378.9975 / 1702.7745 / 1851.3955 / 1865.4681 |
+| `fts-hotpotqa-medium-milvus-text-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | text | 2033.2594 | 1714.0357 | 0.8378 | 0.7246 | 0.8561 | 0.0124 | 0.0170 | 1/10/20/40/60/80 | 223.9828 / 1224.1637 / 1558.9074 / 1669.1467 / 1687.2785 / 1714.0357 |
+| `fts-e2e-milvus-hotpotqa-large-r7i` | 5.2M | ids_only | 10583.8485 | 394.4417 | 0.7573 | 0.6129 | 0.7410 | 0.0212 | 0.0299 | 1/5/10/20 | 88.1695 / 336.8579 / 388.2553 / 394.4417 |
+| `fts-matrix-milvus-hotpotqa-large-ids-c20-40-80-r7i-20260603T061706Z` | 5.2M | ids_only | 10583.8402 | 411.7323 | 0.7573 | 0.6129 | 0.7410 | 0.0211 | 0.0305 | 20/40/80 | 400.7550 / 407.1847 / 411.7323 |
+| `fts-matrix-milvus-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z` | 5.2M | text | 10583.7873 | 409.4366 | 0.7573 | 0.6129 | 0.7410 | 0.0214 | 0.0308 | 20/40/80 | 395.3148 / 407.5527 / 409.4366 |

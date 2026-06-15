@@ -101,7 +101,7 @@ def _load_cloud_insert_file(root: Path, json_file: Path) -> CloudInsertRow:
 
     return CloudInsertRow(
         product_key=product_key,
-        product_name=PRODUCT_NAMES.get(product_key, _title_from_key(product_key)),
+        product_name=_product_display_name(product_key, mode_key),
         mode_key=mode_key,
         mode_display=MODE_NAMES.get(mode_key, _title_from_key(mode_key)),
         batch_key=batch_key,
@@ -144,6 +144,13 @@ def _parse_cloud_insert_path(root: Path, json_file: Path) -> tuple[str, str, str
             "or <product>/<mode>/<batch>/result_*.json"
         )
     return product_key, mode_key, batch_key
+
+
+def _product_display_name(product_key: str, mode_key: str) -> str:
+    product_name = PRODUCT_NAMES.get(product_key, _title_from_key(product_key))
+    if product_key == "turbopuffer" and mode_key in {"bp_off", "bp_on"}:
+        return f"{product_name} ({MODE_NAMES[mode_key]})"
+    return product_name
 
 
 def _single_result(data: dict[str, Any], json_file: Path) -> dict[str, Any]:

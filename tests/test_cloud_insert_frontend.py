@@ -113,11 +113,43 @@ def test_cloud_insert_loader_preserves_turbopuffer_backpressure_mode(tmp_path):
     row = load_cloud_insert_rows(tmp_path)[0]
 
     assert row.product_key == "turbopuffer"
-    assert row.product_name == "Turbopuffer"
+    assert row.product_name == "Turbopuffer (Backpressure Off)"
     assert row.mode_key == "bp_off"
     assert row.mode_display == "Backpressure Off"
     assert row.batch_key == "batch_5k"
     assert row.batch_size == 5000
+
+
+def test_cloud_insert_loader_displays_turbopuffer_backpressure_modes_as_products(tmp_path):
+    _write_cloud_insert_result(
+        tmp_path,
+        "turbopuffer/bp_off/batch_5k/result_bp_off.json",
+        db="TurboPuffer",
+        db_label="turbopuffer_bp_off_cloud_insert_laion100m_bs5k",
+        custom_case={
+            "batch_size": 5000,
+            "duration": None,
+            "dataset_with_size_type": "LAION 100M",
+        },
+    )
+    _write_cloud_insert_result(
+        tmp_path,
+        "turbopuffer/bp_on/batch_5k/result_bp_on.json",
+        db="TurboPuffer",
+        db_label="turbopuffer_bp_on_cloud_insert_laion100m_bs5k",
+        custom_case={
+            "batch_size": 5000,
+            "duration": None,
+            "dataset_with_size_type": "LAION 100M",
+        },
+    )
+
+    records = cloud_insert_records(load_cloud_insert_rows(tmp_path))
+
+    assert [record["Product"] for record in records] == [
+        "Turbopuffer (Backpressure Off)",
+        "Turbopuffer (Backpressure On)",
+    ]
 
 
 def test_cloud_insert_records_are_table_ready(tmp_path):

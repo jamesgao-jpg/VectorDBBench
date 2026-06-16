@@ -33,6 +33,7 @@ def NavToPages(st):
         {"name": "Cloud Payload Search", "link": "cloud_payload_search"},
         {"name": "Cloud Multi-Tenant Search", "link": "cloud_multi_tenant_search"},
         {"name": "Cloud Insert", "link": "cloud_insert"},
+        {"name": "Cloud Cold Latency", "link": "cloud_cold_latency"},
         {"name": "Tables", "link": "tables"},
         {"name": "Custom Dataset", "link": "custom"},
     ]

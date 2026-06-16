@@ -316,6 +316,9 @@ CLOUD_MULTI_TENANT_SEARCH_CUSTOM_CASE = {
 }
 CLOUD_INSERT_BATCH_SIZES = (1000, 5000, 10000)
 CLOUD_INSERT_DATASET = DatasetWithSizeType.LAIONLarge.value
+CLOUD_COLD_LATENCY_PAYLOAD_PROFILE = "ids_only"
+CLOUD_COLD_LATENCY_QUERY_COUNT = 1000
+CLOUD_COLD_LATENCY_INT_FILTER_RATE = 0.9
 
 
 def _cloud_payload_profiles(payload_profile: str | None = None) -> tuple[str, ...]:
@@ -435,6 +438,32 @@ def generate_cloud_insert_cases(batch_size: int | None = None) -> list[CaseConfi
     ]
 
 
+def generate_cloud_cold_latency_cases(mode: str | None = None) -> list[CaseConfig]:
+    cases = []
+    base_custom_case = {
+        "payload_profile": CLOUD_COLD_LATENCY_PAYLOAD_PROFILE,
+        "query_count": CLOUD_COLD_LATENCY_QUERY_COUNT,
+    }
+    if mode in (None, "unfiltered"):
+        cases.append(
+            CaseConfig(
+                case_id=CaseType.CloudColdLatencyCase,
+                custom_case={**base_custom_case},
+            )
+        )
+    if mode in (None, "int_filter_0.9"):
+        cases.append(
+            CaseConfig(
+                case_id=CaseType.CloudColdLatencyCase,
+                custom_case={
+                    **base_custom_case,
+                    "filter_rate": CLOUD_COLD_LATENCY_INT_FILTER_RATE,
+                },
+            )
+        )
+    return cases
+
+
 def _cloud_payload_search_ui_items() -> list[UICaseItem]:
     filter_modes = (
         (
@@ -510,6 +539,32 @@ def _cloud_insert_ui_items() -> list[UICaseItem]:
             cases=generate_cloud_insert_cases(batch_size),
         )
         for batch_size in CLOUD_INSERT_BATCH_SIZES
+    ]
+
+
+def _cloud_cold_latency_ui_items() -> list[UICaseItem]:
+    modes = (
+        (
+            "unfiltered",
+            "Unfiltered",
+            "without filters",
+        ),
+        (
+            "int_filter_0.9",
+            "Int Filter 0.9",
+            "with integer filter rate 90%",
+        ),
+    )
+    return [
+        UICaseItem(
+            label=f"Cloud Cold Latency - LAION 100M - {mode_label}",
+            description=(
+                "Runs CloudColdLatencyCase on LAION 100M "
+                f"{mode_description} and records cold/warm serial query latency."
+            ),
+            cases=generate_cloud_cold_latency_cases(mode),
+        )
+        for mode, mode_label, mode_description in modes
     ]
 
 
@@ -600,6 +655,10 @@ UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
     UICaseItemCluster(
         label="Cloud Insert",
         uiCaseItems=_cloud_insert_ui_items(),
+    ),
+    UICaseItemCluster(
+        label="Cloud Cold Latency",
+        uiCaseItems=_cloud_cold_latency_ui_items(),
     ),
     UICaseItemCluster(
         label="Capacity Test",

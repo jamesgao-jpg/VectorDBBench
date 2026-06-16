@@ -15,9 +15,8 @@ from vectordb_bench.frontend.pages.cloud_cold_latency import (
     PAGE_CASE_TITLE,
     PAGE_HEADER_CAPTION,
     PAGE_HEADER_TITLE,
-    cold_latency_case_view_records,
-    mode_options,
-    render_cold_latency_case_html,
+    chart_records_by_mode,
+    chart_records_for_selection,
 )
 
 
@@ -272,129 +271,35 @@ def test_cloud_cold_latency_sidebar_copy_names_the_case():
     assert PAGE_HEADER_CAPTION == "Hosted vector database cold/warm query latency results."
 
 
-def test_cloud_cold_latency_mode_options_use_raw_mode_keys(tmp_path):
-    _write_cloud_cold_latency_result(
-        tmp_path,
-        "pinecone_serverless/int_filter_0.9/result_int_filter.json",
-    )
-    _write_cloud_cold_latency_result(
-        tmp_path,
-        "pinecone_serverless/unfiltered/result_unfiltered.json",
-        custom_case={
-            "payload_profile": "ids_only",
-            "query_count": 1000,
-        },
-    )
-
-    rows = load_cloud_cold_latency_rows(tmp_path)
-
-    assert mode_options(rows) == ["unfiltered", "int_filter_0.9"]
-
-
-def test_cloud_cold_latency_view_records_use_first_query_metrics_and_sort_lower_first(tmp_path):
-    _write_cloud_cold_latency_result(
-        tmp_path,
-        "pinecone_serverless/unfiltered/result_pinecone.json",
-        custom_case={
-            "payload_profile": "ids_only",
-            "query_count": 1000,
-        },
-        metrics={
-            "payload_profile": "ids_only",
-            "payload_estimated_bytes_per_query": 2000,
-            "cold_latency": {
-                "cold_stats": {
-                    "first_query_latency": 0.271,
-                    "p99_latency": 1.0,
-                    "p95_latency": 0.9,
-                    "avg_latency": 0.2,
-                },
-                "warm_stats": {
-                    "first_query_latency": 0.060,
-                    "p99_latency": 1.0,
-                    "p95_latency": 0.9,
-                    "avg_latency": 0.2,
-                },
-                "cold_warm_ratio": {
-                    "first_query_latency_ratio": 4.52,
-                    "p99_latency_ratio": 1.0,
-                    "p95_latency_ratio": 1.0,
-                    "avg_latency_ratio": 1.0,
-                },
-            },
-        },
-    )
-    _write_cloud_cold_latency_result(
-        tmp_path,
-        "zilliz_cloud_cap_12cu/unfiltered/result_zilliz.json",
-        db="ZillizCloud",
-        custom_case={
-            "payload_profile": "ids_only",
-            "query_count": 1000,
-        },
-        metrics={
-            "payload_profile": "ids_only",
-            "payload_estimated_bytes_per_query": 2000,
-            "cold_latency": {
-                "cold_stats": {
-                    "first_query_latency": 0.055,
-                    "p99_latency": 0.02,
-                    "p95_latency": 0.02,
-                    "avg_latency": 0.01,
-                },
-                "warm_stats": {
-                    "first_query_latency": 0.054,
-                    "p99_latency": 0.02,
-                    "p95_latency": 0.02,
-                    "avg_latency": 0.01,
-                },
-                "cold_warm_ratio": {
-                    "first_query_latency_ratio": 1.01,
-                    "p99_latency_ratio": 1.0,
-                    "p95_latency_ratio": 1.0,
-                    "avg_latency_ratio": 1.0,
-                },
-            },
-        },
-    )
-
-    records = cold_latency_case_view_records(load_cloud_cold_latency_rows(tmp_path), "unfiltered")
-
-    assert [record["product_name"] for record in records] == [
-        "Zilliz Cloud Capacity 12CU",
-        "Pinecone Serverless",
+def test_cloud_cold_latency_chart_records_group_by_mode():
+    records = [
+        {"Mode": "Unfiltered", "Product": "Pinecone Serverless"},
+        {"Mode": "Int Filter 0.9", "Product": "Pinecone Serverless"},
+        {"Mode": "Unfiltered", "Product": "Turbopuffer"},
     ]
-    assert records[0]["cold_ms"] == 55
-    assert records[0]["warm_ms"] == 54
-    assert records[0]["first_query_ratio"] == 1.01
-    assert records[1]["cold_ms"] == 271
-    assert records[1]["warm_ms"] == 60
-    assert records[1]["first_query_ratio"] == 4.52
+
+    grouped = chart_records_by_mode(records)
+
+    assert list(grouped.keys()) == ["Unfiltered", "Int Filter 0.9"]
+    assert grouped["Unfiltered"] == [
+        {"Mode": "Unfiltered", "Product": "Pinecone Serverless"},
+        {"Mode": "Unfiltered", "Product": "Turbopuffer"},
+    ]
 
 
-def test_cloud_cold_latency_rendered_case_html_matches_reference_layout(tmp_path):
-    _write_cloud_cold_latency_result(
-        tmp_path,
-        "turbopuffer_pinned/unfiltered/result_fixture.json",
-        db="TurboPuffer",
-        db_label="turbopuffer_pinned_2rep_cloud_cold_latency_laion100m_unfiltered",
-        custom_case={
-            "payload_profile": "ids_only",
-            "query_count": 1000,
-        },
+def test_cloud_cold_latency_chart_records_for_selection_show_one_payload():
+    records = [
+        {"Mode": "Unfiltered", "Payload": "IDs Only", "Product": "Pinecone Serverless"},
+        {"Mode": "Unfiltered", "Payload": "Vector", "Product": "Pinecone Serverless"},
+        {"Mode": "Int Filter 0.9", "Payload": "IDs Only", "Product": "Pinecone Serverless"},
+    ]
+
+    selected = chart_records_for_selection(
+        records,
+        mode="Unfiltered",
+        payload="IDs Only",
     )
 
-    records = cold_latency_case_view_records(load_cloud_cold_latency_rows(tmp_path), "unfiltered")
-    html = render_cold_latency_case_html(records, "unfiltered")
-    first_line = next(line for line in html.splitlines() if line.strip())
-
-    assert first_line.startswith("<")
-    assert "Cloud Cold Latency Case" in html
-    assert "Cold / Warm Latency" in html
-    assert "Cold / Warm Ratio" in html
-    assert "lower is better" in html
-    assert "Notes:" in html
-    assert "first query after an idle cold period" in html
-    assert "Turbopuffer Pinned" in html
-    assert "911 / 115" in html
-    assert "7.92x" in html
+    assert selected == [
+        {"Mode": "Unfiltered", "Payload": "IDs Only", "Product": "Pinecone Serverless"},
+    ]

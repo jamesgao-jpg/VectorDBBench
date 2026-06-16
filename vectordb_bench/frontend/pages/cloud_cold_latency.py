@@ -1,5 +1,6 @@
 from pathlib import Path
 from html import escape
+from textwrap import dedent
 
 import streamlit as st
 
@@ -134,13 +135,13 @@ def cold_latency_case_view_records(rows: list[CloudColdLatencyRow], mode_key: st
 
 
 def render_cold_latency_intro_html() -> str:
-    return f"""
+    return _html_fragment(f"""
     <style>{_CLOUD_COLD_LATENCY_CSS}</style>
     <div class="cloud-cold-intro">
       <h1>{escape(CASE_TITLE)}</h1>
       <p>{escape(CASE_DESCRIPTION)}</p>
     </div>
-    """
+    """)
 
 
 def render_cold_latency_case_html(
@@ -152,7 +153,7 @@ def render_cold_latency_case_html(
     intro = render_cold_latency_intro_html() if include_intro else f"<style>{_CLOUD_COLD_LATENCY_CSS}</style>"
     latency_rows = "\n".join(_render_latency_row(record) for record in records)
     ratio_rows = "\n".join(_render_ratio_row(record) for record in records)
-    return f"""
+    return _html_fragment(f"""
     {intro}
     <div class="cloud-cold-mode-readout">
       <div class="cloud-cold-mode-label">Mode</div>
@@ -181,13 +182,13 @@ def render_cold_latency_case_html(
         <li>The timing for when a product's collection becomes cold is rather ambiguous since most products don't offer public APIs to provide such info. In order to simulate real world production settings, for cold latency benchmarking, we ensure to wait at least 24 hours since the last operations on the products for the collections to become as cold as possible.</li>
       </ol>
     </section>
-    """
+    """)
 
 
 def _render_latency_row(record: dict) -> str:
     product = escape(record["product_name"])
     status_title = f' title="{escape(record["status"])}"'
-    return f"""
+    return _html_fragment(f"""
     <div class="cloud-cold-row"{status_title}>
       <div class="cloud-cold-product">{product}</div>
       <div class="cloud-cold-bar-track">
@@ -196,12 +197,12 @@ def _render_latency_row(record: dict) -> str:
       </div>
       <div class="cloud-cold-value"><strong>{record["cold_ms"]} / {record["warm_ms"]}</strong><span>ms</span></div>
     </div>
-    """
+    """)
 
 
 def _render_ratio_row(record: dict) -> str:
     product = escape(record["product_name"])
-    return f"""
+    return _html_fragment(f"""
     <div class="cloud-cold-row">
       <div class="cloud-cold-product">{product}</div>
       <div class="cloud-cold-bar-track">
@@ -209,7 +210,11 @@ def _render_ratio_row(record: dict) -> str:
       </div>
       <div class="cloud-cold-value"><strong>{record["first_query_ratio"]:.2f}x</strong></div>
     </div>
-    """
+    """)
+
+
+def _html_fragment(markup: str) -> str:
+    return dedent(markup).strip()
 
 
 def _mode_sort_key(value: str) -> tuple[int, str]:

@@ -386,7 +386,9 @@ def test_cloud_cold_latency_rendered_case_html_matches_reference_layout(tmp_path
 
     records = cold_latency_case_view_records(load_cloud_cold_latency_rows(tmp_path), "unfiltered")
     html = render_cold_latency_case_html(records, "unfiltered")
+    first_line = next(line for line in html.splitlines() if line.strip())
 
+    assert first_line.startswith("<")
     assert "Cloud Cold Latency Case" in html
     assert "Cold / Warm Latency" in html
     assert "Cold / Warm Ratio" in html

@@ -41,6 +41,19 @@ Rerun server machine:
 - Docker: Docker `24.0.5`, Docker Compose `v2.27.0`.
 - Role: runs the Vespa container and `/srv/vespa` state directories for the `r7i` rerun.
 
+<!-- BEGIN 20260621 MATH GT SERVER STATS -->
+
+Math-GT rerun server machine:
+
+- EC2 type: `i8g.4xlarge`.
+- OS: Ubuntu 22.04, Linux `6.8.0-1057-aws`, `aarch64`.
+- CPU: 16 vCPU, Neoverse-V2, 1 thread per core.
+- Memory: about 123 GiB RAM, no swap.
+- Disk quota: `/dev/root` ext4, 485 GiB total, 462 GiB available at verification.
+- Role: runs fresh Milvus, Elasticsearch, and Vespa server deployments for the 2026-06-21 math-GT ids-only rerun.
+
+<!-- END 20260621 MATH GT SERVER STATS -->
+
 ## Server Setup
 
 Validated deployment:
@@ -246,6 +259,59 @@ done
 
 Effective Vespa FTS case config from the raw JSON: no backend-specific case fields are set. The VDBBench Vespa adapter deploys the application package through port `19071` and queries through port `8080`.
 
+<!-- BEGIN 20260621 MATH GT VDBBENCH SCRIPT -->
+
+Sanitized client script for the 2026-06-21 math-GT ids-only rerun:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/ubuntu/VectorDBBench
+export DATASET_LOCAL_DIR=/tmp/vectordb_bench/dataset
+export RESULTS_LOCAL_DIR=/tmp/vectordb_bench/results
+export NUM_PER_BATCH=100
+export SERVER_HOST="<server-private-host-or-dns>"
+export RUN_STAMP=20260621T150656Z
+export CONCURRENCY=1,10,20,40,60,80
+export CONCURRENCY_DURATION=30
+export CONCURRENCY_TIMEOUT=3600
+export LOAD_CONCURRENCY=0
+export K=100
+export PAYLOAD_PROFILE=ids_only
+
+DATASET_LABELS=(
+  "MS MARCO Small (100K documents)"
+  "MS MARCO Medium (1M documents)"
+  "MS MARCO Large (8.8M documents)"
+)
+
+for DATASET_LABEL in "${DATASET_LABELS[@]}"; do
+  case "${DATASET_LABEL}" in
+    *Small*) SIZE_KEY=small ;;
+    *Medium*) SIZE_KEY=medium ;;
+    *Large*) SIZE_KEY=large ;;
+  esac
+  TASK_LABEL="fts-matrix-vespa-msmarco-${SIZE_KEY}-ids-mathgt-${RUN_STAMP}"
+
+  python3.11 -m vectordb_bench.cli.vectordbbench vespa \
+  --uri "http://${SERVER_HOST}" \
+  --port 8080 \
+    --task-label "${TASK_LABEL}" \
+    --case-type FTSmsmarcoPerformance \
+    --dataset-with-size-type "${DATASET_LABEL}" \
+    --payload-profile "${PAYLOAD_PROFILE}" \
+    --drop-old --load --search-serial --search-concurrent \
+    --load-concurrency "${LOAD_CONCURRENCY}" \
+    --k "${K}" \
+    --concurrency-duration "${CONCURRENCY_DURATION}" \
+    --num-concurrency "${CONCURRENCY}" \
+    --concurrency-timeout "${CONCURRENCY_TIMEOUT}"
+done
+```
+
+<!-- END 20260621 MATH GT VDBBENCH SCRIPT -->
+
 ## Result
 
 | Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
@@ -302,3 +368,17 @@ MS MARCO Large observations:
 - Both Vespa rows peaked at concurrency `80`.
 - Text-payload QPS was `187.5886`, which is 2.6% below ids-only at the same concurrency list.
 - Vespa text emitted timeout/docsum warnings at high concurrency but completed and produced a valid raw JSON.
+
+<!-- BEGIN 20260621 MATH GT IDS ONLY -->
+
+### 2026-06-21 Math-GT ids-only rerun
+
+These rows use generated BM25 mathematical ground truth from `neighbors.parquet` instead of IR dataset qrels. The primary quality metric for this rerun is recall; the current JSONs emit `ndcg=0.0` and no `mrr` field. The JSON `inserted_count` field is `null`, so inserted count is intentionally not reported here.
+
+| Dataset size | Task label | Payload | Load s | Insert s | Optimize s | QPS | Recall | NDCG | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| MS MARCO Small (100K documents) | `fts-matrix-vespa-msmarco-small-ids-mathgt-20260621T150656Z` | ids_only | 27.6829 | 27.6829 | 0.0000 | 735.3580 | 0.7466 | 0.0000 | 0.0159 | 0.0196 | 1/10/20/40/60/80 | 104.8972 / 735.3580 / 514.5597 / 387.6114 / 676.5868 / 623.4075 |
+| MS MARCO Medium (1M documents) | `fts-matrix-vespa-msmarco-medium-ids-mathgt-20260621T150656Z` | ids_only | 225.0491 | 225.0491 | 0.0000 | 305.7255 | 0.7298 | 0.0000 | 0.1068 | 0.1413 | 1/10/20/40/60/80 | 19.0626 / 199.0932 / 292.6319 / 296.4212 / 305.7255 / 302.4968 |
+| MS MARCO Large (8.8M documents) | `fts-matrix-vespa-msmarco-large-ids-mathgt-20260621T150656Z` | ids_only | 2011.2197 | 2011.2197 | 0.0000 | 194.8595 | 0.6907 | 0.0000 | 0.4443 | 0.4448 | 1/10/20/40/60/80 | 2.8601 / 38.1890 / 61.7164 / 108.3861 / 153.9399 / 194.8595 |
+
+<!-- END 20260621 MATH GT IDS ONLY -->

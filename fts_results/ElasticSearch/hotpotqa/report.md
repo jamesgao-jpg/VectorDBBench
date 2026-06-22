@@ -31,6 +31,19 @@ Server machine:
 - Docker: Docker `24.0.5`, Docker Compose `v2.27.0`.
 - Role: runs the Elasticsearch container.
 
+<!-- BEGIN 20260621 MATH GT SERVER STATS -->
+
+Math-GT rerun server machine:
+
+- EC2 type: `i8g.4xlarge`.
+- OS: Ubuntu 22.04, Linux `6.8.0-1057-aws`, `aarch64`.
+- CPU: 16 vCPU, Neoverse-V2, 1 thread per core.
+- Memory: about 123 GiB RAM, no swap.
+- Disk quota: `/dev/root` ext4, 485 GiB total, 462 GiB available at verification.
+- Role: runs fresh Milvus, Elasticsearch, and Vespa server deployments for the 2026-06-21 math-GT ids-only rerun.
+
+<!-- END 20260621 MATH GT SERVER STATS -->
+
 ## Server Setup
 
 Validated deployment:
@@ -207,6 +220,61 @@ Effective Elasticsearch FTS case config from the raw JSON:
 - `use_ssl=false`
 - `verify_certs=true`
 
+<!-- BEGIN 20260621 MATH GT VDBBENCH SCRIPT -->
+
+Sanitized client script for the 2026-06-21 math-GT ids-only rerun:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/ubuntu/VectorDBBench
+export DATASET_LOCAL_DIR=/tmp/vectordb_bench/dataset
+export RESULTS_LOCAL_DIR=/tmp/vectordb_bench/results
+export NUM_PER_BATCH=100
+export SERVER_HOST="<server-private-host-or-dns>"
+export RUN_STAMP=20260621T150656Z
+export CONCURRENCY=1,10,20,40,60,80
+export CONCURRENCY_DURATION=30
+export CONCURRENCY_TIMEOUT=3600
+export LOAD_CONCURRENCY=0
+export K=100
+export PAYLOAD_PROFILE=ids_only
+
+DATASET_LABELS=(
+  "HotpotQA Small (100K documents)"
+  "HotpotQA Medium (1M documents)"
+  "HotpotQA Large (5.2M documents)"
+)
+
+for DATASET_LABEL in "${DATASET_LABELS[@]}"; do
+  case "${DATASET_LABEL}" in
+    *Small*) SIZE_KEY=small ;;
+    *Medium*) SIZE_KEY=medium ;;
+    *Large*) SIZE_KEY=large ;;
+  esac
+  TASK_LABEL="fts-matrix-elastic-hotpotqa-${SIZE_KEY}-ids-mathgt-${RUN_STAMP}"
+
+  python3.11 -m vectordb_bench.cli.vectordbbench elasticcloudhnsw \
+  --scheme http \
+  --host "${SERVER_HOST}" \
+  --port 9200 \
+  --password "<elastic-password>" \
+    --task-label "${TASK_LABEL}" \
+    --case-type FTSmsmarcoPerformance \
+    --dataset-with-size-type "${DATASET_LABEL}" \
+    --payload-profile "${PAYLOAD_PROFILE}" \
+    --drop-old --load --search-serial --search-concurrent \
+    --load-concurrency "${LOAD_CONCURRENCY}" \
+    --k "${K}" \
+    --concurrency-duration "${CONCURRENCY_DURATION}" \
+    --num-concurrency "${CONCURRENCY}" \
+    --concurrency-timeout "${CONCURRENCY_TIMEOUT}"
+done
+```
+
+<!-- END 20260621 MATH GT VDBBENCH SCRIPT -->
+
 ## Result
 
 The ids-only matrix run `fts-matrix-elastic-hotpotqa-large-ids-c20-40-80-r7i-20260603T061706Z` is intentionally excluded from the result table because VDBBench emitted only a zero-metric failure placeholder JSON. Log evidence shows the run loaded successfully (`load_duration=545.7043s`) and completed concurrency 20/40 (`447.5993 / 480.0184 QPS`), but the parent process hung after starting concurrency 80 and was terminated with `RUN_FAILED_143`.
@@ -218,3 +286,17 @@ The ids-only matrix run `fts-matrix-elastic-hotpotqa-large-ids-c20-40-80-r7i-202
 | `fts-hotpotqa-medium-elastic-text-c1-10-20-40-60-80-r7i-20260604T074646Z` | 1M | text | 140.1574 | 1238.7840 | 0.8378 | 0.7287 | 0.8598 | 0.0171 | 0.0237 | 1/10/20/40/60/80 | 94.8516 / 870.2786 / 1203.6183 / 1230.3996 / 1238.7840 / 1229.2721 |
 | `fts-e2e-elastic-hotpotqa-large-r7i` | 5.2M | ids_only | 550.6164 | 476.2610 | 0.7637 | 0.6243 | 0.7549 | 0.0503 | 0.0755 | 1/5/10/20 | 41.0129 / 202.7703 / 356.3845 / 476.2610 |
 | `fts-matrix-elastic-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z` | 5.2M | text | 554.4492 | 435.1027 | 0.7637 | 0.6243 | 0.7549 | 0.0518 | 0.0766 | 20/40/80 | 402.3090 / 435.1027 / 434.3993 |
+
+<!-- BEGIN 20260621 MATH GT IDS ONLY -->
+
+### 2026-06-21 Math-GT ids-only rerun
+
+These rows use generated BM25 mathematical ground truth from `neighbors.parquet` instead of IR dataset qrels. The primary quality metric for this rerun is recall; the current JSONs emit `ndcg=0.0` and no `mrr` field. The JSON `inserted_count` field is `null`, so inserted count is intentionally not reported here.
+
+| Dataset size | Task label | Payload | Load s | Insert s | Optimize s | QPS | Recall | NDCG | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| HotpotQA Small (100K documents) | `fts-matrix-elastic-hotpotqa-small-ids-mathgt-20260621T150656Z` | ids_only | 34.3497 | 3.3234 | 31.0263 | 6461.6069 | 0.8750 | 0.0000 | 0.0045 | 0.0057 | 1/10/20/40/60/80 | 368.5025 / 3467.8430 / 5348.3790 / 6428.9145 / 6455.8945 / 6461.6069 |
+| HotpotQA Medium (1M documents) | `fts-matrix-elastic-hotpotqa-medium-ids-mathgt-20260621T150656Z` | ids_only | 65.2426 | 34.2934 | 30.9491 | 2073.6098 | 0.8620 | 0.0000 | 0.0166 | 0.0237 | 1/10/20/40/60/80 | 123.4348 / 1226.2127 / 1918.1030 / 2057.6807 / 2073.6098 / 2072.1953 |
+| HotpotQA Large (5.2M documents) | `fts-matrix-elastic-hotpotqa-large-ids-mathgt-20260621T150656Z` | ids_only | 256.6338 | 194.9027 | 61.7311 | 659.2480 | 0.8553 | 0.0000 | 0.0570 | 0.0851 | 1/10/20/40/60/80 | 38.6843 / 408.8350 / 622.3226 / 659.1277 / 656.1379 / 659.2480 |
+
+<!-- END 20260621 MATH GT IDS ONLY -->

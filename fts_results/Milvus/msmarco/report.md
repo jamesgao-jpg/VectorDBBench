@@ -41,6 +41,19 @@ Rerun server machine:
 - Docker: Docker `24.0.5`, Docker Compose `v2.27.0`.
 - Role: runs the Milvus standalone server deployment for the `r7i` rerun.
 
+<!-- BEGIN 20260621 MATH GT SERVER STATS -->
+
+Math-GT rerun server machine:
+
+- EC2 type: `i8g.4xlarge`.
+- OS: Ubuntu 22.04, Linux `6.8.0-1057-aws`, `aarch64`.
+- CPU: 16 vCPU, Neoverse-V2, 1 thread per core.
+- Memory: about 123 GiB RAM, no swap.
+- Disk quota: `/dev/root` ext4, 485 GiB total, 462 GiB available at verification.
+- Role: runs fresh Milvus, Elasticsearch, and Vespa server deployments for the 2026-06-21 math-GT ids-only rerun.
+
+<!-- END 20260621 MATH GT SERVER STATS -->
+
 ## Server Setup
 
 Validated deployment:
@@ -254,6 +267,58 @@ Effective Milvus FTS case config from the raw JSON:
 - `num_shards=1`
 - `replica_number=1`
 
+<!-- BEGIN 20260621 MATH GT VDBBENCH SCRIPT -->
+
+Sanitized client script for the 2026-06-21 math-GT ids-only rerun:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/ubuntu/VectorDBBench
+export DATASET_LOCAL_DIR=/tmp/vectordb_bench/dataset
+export RESULTS_LOCAL_DIR=/tmp/vectordb_bench/results
+export NUM_PER_BATCH=100
+export SERVER_HOST="<server-private-host-or-dns>"
+export RUN_STAMP=20260621T150656Z
+export CONCURRENCY=1,10,20,40,60,80
+export CONCURRENCY_DURATION=30
+export CONCURRENCY_TIMEOUT=3600
+export LOAD_CONCURRENCY=0
+export K=100
+export PAYLOAD_PROFILE=ids_only
+
+DATASET_LABELS=(
+  "MS MARCO Small (100K documents)"
+  "MS MARCO Medium (1M documents)"
+  "MS MARCO Large (8.8M documents)"
+)
+
+for DATASET_LABEL in "${DATASET_LABELS[@]}"; do
+  case "${DATASET_LABEL}" in
+    *Small*) SIZE_KEY=small ;;
+    *Medium*) SIZE_KEY=medium ;;
+    *Large*) SIZE_KEY=large ;;
+  esac
+  TASK_LABEL="fts-matrix-milvus-msmarco-${SIZE_KEY}-ids-mathgt-${RUN_STAMP}"
+
+  python3.11 -m vectordb_bench.cli.vectordbbench milvusfts \
+  --uri "http://${SERVER_HOST}:19530" \
+    --task-label "${TASK_LABEL}" \
+    --case-type FTSmsmarcoPerformance \
+    --dataset-with-size-type "${DATASET_LABEL}" \
+    --payload-profile "${PAYLOAD_PROFILE}" \
+    --drop-old --load --search-serial --search-concurrent \
+    --load-concurrency "${LOAD_CONCURRENCY}" \
+    --k "${K}" \
+    --concurrency-duration "${CONCURRENCY_DURATION}" \
+    --num-concurrency "${CONCURRENCY}" \
+    --concurrency-timeout "${CONCURRENCY_TIMEOUT}"
+done
+```
+
+<!-- END 20260621 MATH GT VDBBENCH SCRIPT -->
+
 ## Result
 
 | Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
@@ -310,3 +375,17 @@ MS MARCO Large observations:
 - The large Milvus ids-only and text-payload runs both peaked at concurrency `80`.
 - Text payload QPS was `743.7173`, which is 0.7% above ids-only in this run; this is within the range where run-to-run variance can dominate the payload effect.
 - Recall stayed unchanged at `0.6206`.
+
+<!-- BEGIN 20260621 MATH GT IDS ONLY -->
+
+### 2026-06-21 Math-GT ids-only rerun
+
+These rows use generated BM25 mathematical ground truth from `neighbors.parquet` instead of IR dataset qrels. The primary quality metric for this rerun is recall; the current JSONs emit `ndcg=0.0` and no `mrr` field. The JSON `inserted_count` field is `null`, so inserted count is intentionally not reported here.
+
+| Dataset size | Task label | Payload | Load s | Insert s | Optimize s | QPS | Recall | NDCG | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| MS MARCO Small (100K documents) | `fts-matrix-milvus-msmarco-small-ids-mathgt-20260621T150656Z` | ids_only | 21.3279 | 1.9816 | 19.3463 | 11404.4883 | 0.9880 | 0.0000 | 0.0022 | 0.0027 | 1/10/20/40/60/80 | 624.4250 / 5402.9614 / 8562.6935 / 10240.8866 / 11019.5892 / 11404.4883 |
+| MS MARCO Medium (1M documents) | `fts-matrix-milvus-msmarco-medium-ids-mathgt-20260621T150656Z` | ids_only | 77.0604 | 20.8227 | 56.2377 | 5662.2877 | 0.9896 | 0.0000 | 0.0062 | 0.0086 | 1/10/20/40/60/80 | 305.2597 / 2913.6627 / 4352.3168 / 5138.1525 / 5530.6816 / 5662.2877 |
+| MS MARCO Large (8.8M documents) | `fts-matrix-milvus-msmarco-large-ids-mathgt-20260621T150656Z` | ids_only | 495.1239 | 221.3709 | 273.7530 | 1351.2833 | 0.9910 | 0.0000 | 0.0176 | 0.0269 | 1/10/20/40/60/80 | 124.6555 / 1045.9747 / 1226.9505 / 1289.9100 / 1343.4557 / 1351.2833 |
+
+<!-- END 20260621 MATH GT IDS ONLY -->

@@ -31,6 +31,19 @@ Server machine:
 - Docker: Docker `24.0.5`, Docker Compose `v2.27.0`.
 - Role: runs the Milvus standalone server deployment.
 
+<!-- BEGIN 20260621 MATH GT SERVER STATS -->
+
+Math-GT rerun server machine:
+
+- EC2 type: `i8g.4xlarge`.
+- OS: Ubuntu 22.04, Linux `6.8.0-1057-aws`, `aarch64`.
+- CPU: 16 vCPU, Neoverse-V2, 1 thread per core.
+- Memory: about 123 GiB RAM, no swap.
+- Disk quota: `/dev/root` ext4, 485 GiB total, 462 GiB available at verification.
+- Role: runs fresh Milvus, Elasticsearch, and Vespa server deployments for the 2026-06-21 math-GT ids-only rerun.
+
+<!-- END 20260621 MATH GT SERVER STATS -->
+
 ## Server Setup
 
 Validated deployment:
@@ -222,6 +235,58 @@ Effective Milvus FTS case config from the raw JSON:
 - `num_shards=1`
 - `replica_number=1`
 
+<!-- BEGIN 20260621 MATH GT VDBBENCH SCRIPT -->
+
+Sanitized client script for the 2026-06-21 math-GT ids-only rerun:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/ubuntu/VectorDBBench
+export DATASET_LOCAL_DIR=/tmp/vectordb_bench/dataset
+export RESULTS_LOCAL_DIR=/tmp/vectordb_bench/results
+export NUM_PER_BATCH=100
+export SERVER_HOST="<server-private-host-or-dns>"
+export RUN_STAMP=20260621T150656Z
+export CONCURRENCY=1,10,20,40,60,80
+export CONCURRENCY_DURATION=30
+export CONCURRENCY_TIMEOUT=3600
+export LOAD_CONCURRENCY=0
+export K=100
+export PAYLOAD_PROFILE=ids_only
+
+DATASET_LABELS=(
+  "HotpotQA Small (100K documents)"
+  "HotpotQA Medium (1M documents)"
+  "HotpotQA Large (5.2M documents)"
+)
+
+for DATASET_LABEL in "${DATASET_LABELS[@]}"; do
+  case "${DATASET_LABEL}" in
+    *Small*) SIZE_KEY=small ;;
+    *Medium*) SIZE_KEY=medium ;;
+    *Large*) SIZE_KEY=large ;;
+  esac
+  TASK_LABEL="fts-matrix-milvus-hotpotqa-${SIZE_KEY}-ids-mathgt-${RUN_STAMP}"
+
+  python3.11 -m vectordb_bench.cli.vectordbbench milvusfts \
+  --uri "http://${SERVER_HOST}:19530" \
+    --task-label "${TASK_LABEL}" \
+    --case-type FTSmsmarcoPerformance \
+    --dataset-with-size-type "${DATASET_LABEL}" \
+    --payload-profile "${PAYLOAD_PROFILE}" \
+    --drop-old --load --search-serial --search-concurrent \
+    --load-concurrency "${LOAD_CONCURRENCY}" \
+    --k "${K}" \
+    --concurrency-duration "${CONCURRENCY_DURATION}" \
+    --num-concurrency "${CONCURRENCY}" \
+    --concurrency-timeout "${CONCURRENCY_TIMEOUT}"
+done
+```
+
+<!-- END 20260621 MATH GT VDBBENCH SCRIPT -->
+
 ## Result
 
 | Task label | Dataset size | Payload | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
@@ -232,3 +297,17 @@ Effective Milvus FTS case config from the raw JSON:
 | `fts-e2e-milvus-hotpotqa-large-r7i` | 5.2M | ids_only | 10583.8485 | 394.4417 | 0.7573 | 0.6129 | 0.7410 | 0.0212 | 0.0299 | 1/5/10/20 | 88.1695 / 336.8579 / 388.2553 / 394.4417 |
 | `fts-matrix-milvus-hotpotqa-large-ids-c20-40-80-r7i-20260603T061706Z` | 5.2M | ids_only | 10583.8402 | 411.7323 | 0.7573 | 0.6129 | 0.7410 | 0.0211 | 0.0305 | 20/40/80 | 400.7550 / 407.1847 / 411.7323 |
 | `fts-matrix-milvus-hotpotqa-large-text-c20-40-80-r7i-20260603T061706Z` | 5.2M | text | 10583.7873 | 409.4366 | 0.7573 | 0.6129 | 0.7410 | 0.0214 | 0.0308 | 20/40/80 | 395.3148 / 407.5527 / 409.4366 |
+
+<!-- BEGIN 20260621 MATH GT IDS ONLY -->
+
+### 2026-06-21 Math-GT ids-only rerun
+
+These rows use generated BM25 mathematical ground truth from `neighbors.parquet` instead of IR dataset qrels. The primary quality metric for this rerun is recall; the current JSONs emit `ndcg=0.0` and no `mrr` field. The JSON `inserted_count` field is `null`, so inserted count is intentionally not reported here.
+
+| Dataset size | Task label | Payload | Load s | Insert s | Optimize s | QPS | Recall | NDCG | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| HotpotQA Small (100K documents) | `fts-matrix-milvus-hotpotqa-small-ids-mathgt-20260621T150656Z` | ids_only | 22.1836 | 2.5370 | 19.6467 | 8166.9534 | 0.9219 | 0.0000 | 0.0034 | 0.0042 | 1/10/20/40/60/80 | 432.6747 / 3883.8084 / 5972.5282 / 7139.4660 / 7824.2637 / 8166.9534 |
+| HotpotQA Medium (1M documents) | `fts-matrix-milvus-hotpotqa-medium-ids-mathgt-20260621T150656Z` | ids_only | 90.3465 | 23.1773 | 67.1692 | 2266.5843 | 0.9179 | 0.0000 | 0.0142 | 0.0196 | 1/10/20/40/60/80 | 134.4163 / 1315.1920 / 2002.1491 / 2216.3537 / 2257.2126 / 2266.5843 |
+| HotpotQA Large (5.2M documents) | `fts-matrix-milvus-hotpotqa-large-ids-mathgt-20260621T150656Z` | ids_only | 302.1242 | 116.4104 | 185.7137 | 784.9749 | 0.9127 | 0.0000 | 0.0450 | 0.0672 | 1/10/20/40/60/80 | 46.2159 / 477.6217 / 745.7581 / 776.9463 / 781.7123 / 784.9749 |
+
+<!-- END 20260621 MATH GT IDS ONLY -->

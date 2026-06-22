@@ -4,6 +4,12 @@ This report compares the latest committed representative result for each backend
 
 All local-server rows use the `r7i.4xlarge` server unless marked otherwise. TurboPuffer is a managed external backend, so its row is not directly comparable on server hardware. `Load s` is the VectorDBBench load duration. `QPS`, `p95 s`, and `p99 s` are from the search result in the raw JSON. Each row states its payload profile and concurrency list explicitly.
 
+<!-- BEGIN 20260621 MATH GT NOTE -->
+
+Rows with context `i8g.4xlarge`, math GT 2026-06-21 use generated BM25 mathematical ground truth from `neighbors.parquet` instead of IR dataset qrels. For those rows, recall is the primary quality metric; `NDCG` is the JSON-emitted `0.0`, and `MRR` is `n/a` because the result JSONs do not include MRR.
+
+<!-- END 20260621 MATH GT NOTE -->
+
 ## Table of Contents
 
 - [FTS Index And Ranking Configuration](#fts-index-and-ranking-configuration)
@@ -34,6 +40,9 @@ Text-payload rows used `payload_profile=text`, `k=100`, `concurrency_duration=30
 
 | Backend | Payload | Context | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 21.3279 | 11404.4883 | 0.9880 | 0.0000 | n/a | 0.0022 | 0.0027 | 1/10/20/40/60/80 | 624.4250 / 5402.9614 / 8562.6935 / 10240.8866 / 11019.5892 / 11404.4883 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 34.5372 | 12792.5025 | 0.9416 | 0.0000 | n/a | 0.0023 | 0.0028 | 1/10/20/40/60/80 | 601.7296 / 5910.0014 / 9375.6363 / 11945.9017 / 12685.7963 / 12792.5025 |
+| Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 27.6829 | 735.3580 | 0.7466 | 0.0000 | n/a | 0.0159 | 0.0196 | 1/10/20/40/60/80 | 104.8972 / 735.3580 / 514.5597 / 387.6114 / 676.5868 / 623.4075 |
 | Milvus | ids_only | `r7i.4xlarge` | 230.3305 | 9359.8351 | 0.9157 | 0.7157 | 0.6653 | 0.0026 | 0.0029 | 1/5/10/20 | 528.3714 / 3129.5306 / 5750.1304 / 9359.8351 |
 | Milvus | text | `r7i.4xlarge` | 230.4392 | 9569.0676 | 0.9157 | 0.7157 | 0.6653 | 0.0029 | 0.0032 | 1/10/20/40/60/80 | 468.2255 / 4857.3898 / 8011.7230 / 9279.3577 / 9569.0676 / 9266.8844 |
 | ElasticSearch | ids_only | `r7i.4xlarge` | 59.4276 | 8689.3499 | 0.9118 | 0.7159 | 0.6665 | 0.0030 | 0.0035 | 1/5/10/20 | 396.5015 / 2534.0129 / 5536.5659 / 8689.3499 |
@@ -44,10 +53,13 @@ Text-payload rows used `payload_profile=text`, `k=100`, `concurrency_duration=30
 
 ## MS MARCO Medium (1M documents)
 
-Rows below are the 2026-06-04 six-concurrency rerun using explicit concurrency `1,10,20,40,60,80`. Older ids-only `1,5,10,20` baselines remain in the backend-specific reports for stability comparison.
+Rows below include the 2026-06-04 six-concurrency rerun and the 2026-06-21 math-GT ids-only rerun, both using explicit concurrency `1,10,20,40,60,80`. Older ids-only `1,5,10,20` baselines remain in the backend-specific reports for stability comparison.
 
 | Backend | Payload | Context | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 77.0604 | 5662.2877 | 0.9896 | 0.0000 | n/a | 0.0062 | 0.0086 | 1/10/20/40/60/80 | 305.2597 / 2913.6627 / 4352.3168 / 5138.1525 / 5530.6816 / 5662.2877 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 64.7575 | 5852.4564 | 0.9366 | 0.0000 | n/a | 0.0062 | 0.0089 | 1/10/20/40/60/80 | 332.6692 / 3155.8439 / 4885.9889 / 5796.7833 / 5852.4564 / 5812.2195 |
+| Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 225.0491 | 305.7255 | 0.7298 | 0.0000 | n/a | 0.1068 | 0.1413 | 1/10/20/40/60/80 | 19.0626 / 199.0932 / 292.6319 / 296.4212 / 305.7255 / 302.4968 |
 | Milvus | ids_only | `r7i.4xlarge` | 2048.1231 | 5139.5920 | 0.8048 | 0.5174 | 0.4458 | 0.0053 | 0.0071 | 1/10/20/40/60/80 | 433.1311 / 2976.3670 / 3973.3733 / 4750.5123 / 5053.7822 / 5139.5920 |
 | Milvus | text | `r7i.4xlarge` | 2048.2360 | 4677.4078 | 0.8048 | 0.5174 | 0.4458 | 0.0057 | 0.0075 | 1/10/20/40/60/80 | 378.3115 / 2732.7863 / 3656.8277 / 4353.0352 / 4602.9011 / 4677.4078 |
 | ElasticSearch | ids_only | `r7i.4xlarge` | 140.1544 | 4473.8674 | 0.8028 | 0.5222 | 0.4526 | 0.0063 | 0.0086 | 1/10/20/40/60/80 | 260.6360 / 2883.9739 / 4166.7860 / 4405.5505 / 4473.8674 / 4458.2345 |
@@ -57,10 +69,13 @@ Rows below are the 2026-06-04 six-concurrency rerun using explicit concurrency `
 
 ## MS MARCO Large (8.8M documents)
 
-Rows below are the 2026-06-04/2026-06-05 six-concurrency run using explicit concurrency `1,10,20,40,60,80`. All rows used `k=100` and `concurrency_duration=30`.
+Rows below include the 2026-06-04/2026-06-05 six-concurrency run and the 2026-06-21 math-GT ids-only rerun. All rows used `k=100`, `concurrency_duration=30`, and explicit concurrency `1,10,20,40,60,80`.
 
 | Backend | Payload | Context | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 495.1239 | 1351.2833 | 0.9910 | 0.0000 | n/a | 0.0176 | 0.0269 | 1/10/20/40/60/80 | 124.6555 / 1045.9747 / 1226.9505 / 1289.9100 / 1343.4557 / 1351.2833 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 439.0781 | 1713.7078 | 0.9304 | 0.0000 | n/a | 0.0283 | 0.0462 | 1/10/20/40/60/80 | 91.7264 / 1036.2800 / 1599.7248 / 1711.8981 / 1713.7078 / 1711.1540 |
+| Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 2011.2197 | 194.8595 | 0.6907 | 0.0000 | n/a | 0.4443 | 0.4448 | 1/10/20/40/60/80 | 2.8601 / 38.1890 / 61.7164 / 108.3861 / 153.9399 / 194.8595 |
 | Milvus | ids_only | `r7i.4xlarge` | 17874.1539 | 738.2857 | 0.6206 | 0.2695 | 0.1824 | 0.0091 | 0.0133 | 1/10/20/40/60/80 | 203.7730 / 701.5716 / 707.9453 / 722.6776 / 735.3773 / 738.2857 |
 | Milvus | text | `r7i.4xlarge` | 17864.1118 | 743.7173 | 0.6206 | 0.2695 | 0.1824 | 0.0099 | 0.0140 | 1/10/20/40/60/80 | 189.9733 / 700.0473 / 692.9175 / 730.2865 / 735.8742 / 743.7173 |
 | ElasticSearch | ids_only | `r7i.4xlarge` | 991.9284 | 1279.2869 | 0.6230 | 0.2733 | 0.1862 | 0.0243 | 0.0389 | 1/10/20/40/60/80 | 92.4571 / 899.7783 / 1217.7168 / 1279.2869 / 1240.2423 / 1202.4733 |
@@ -72,7 +87,13 @@ Vespa text completed but emitted timeout/docsum warnings at concurrency 60 and 8
 
 ## HotpotQA Small (100K documents)
 
-No committed raw result yet.
+Rows below are the 2026-06-21 math-GT ids-only rerun using explicit concurrency `1,10,20,40,60,80`.
+
+| Backend | Payload | Context | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 22.1836 | 8166.9534 | 0.9219 | 0.0000 | n/a | 0.0034 | 0.0042 | 1/10/20/40/60/80 | 432.6747 / 3883.8084 / 5972.5282 / 7139.4660 / 7824.2637 / 8166.9534 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 34.3497 | 6461.6069 | 0.8750 | 0.0000 | n/a | 0.0045 | 0.0057 | 1/10/20/40/60/80 | 368.5025 / 3467.8430 / 5348.3790 / 6428.9145 / 6455.8945 / 6461.6069 |
+| Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 21.7408 | 640.2794 | 0.3496 | 0.0000 | n/a | 0.0268 | 0.0317 | 1/10/20/40/60/80 | 55.3992 / 593.0678 / 506.3641 / 640.2794 / 573.0491 / 638.3529 |
 
 ## HotpotQA Medium (1M documents)
 
@@ -80,6 +101,9 @@ Rows below are the 2026-06-04 six-concurrency rerun using explicit concurrency `
 
 | Backend | Payload | Context | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 90.3465 | 2266.5843 | 0.9179 | 0.0000 | n/a | 0.0142 | 0.0196 | 1/10/20/40/60/80 | 134.4163 / 1315.1920 / 2002.1491 / 2216.3537 / 2257.2126 / 2266.5843 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 65.2426 | 2073.6098 | 0.8620 | 0.0000 | n/a | 0.0166 | 0.0237 | 1/10/20/40/60/80 | 123.4348 / 1226.2127 / 1918.1030 / 2057.6807 / 2073.6098 / 2072.1953 |
+| Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 221.5715 | 186.5870 | 0.4818 | 0.0000 | n/a | 0.2124 | 0.2624 | 1/10/20/40/60/80 | 7.6518 / 81.2353 / 125.9907 / 131.0931 / 153.0614 / 186.5870 |
 | Milvus | ids_only | `r7i.4xlarge` | 2040.9336 | 1865.4681 | 0.8378 | 0.7246 | 0.8561 | 0.0122 | 0.0170 | 1/10/20/40/60/80 | 255.0087 / 1364.3522 / 1378.9975 / 1702.7745 / 1851.3955 / 1865.4681 |
 | Milvus | text | `r7i.4xlarge` | 2033.2594 | 1714.0357 | 0.8378 | 0.7246 | 0.8561 | 0.0124 | 0.0170 | 1/10/20/40/60/80 | 223.9828 / 1224.1637 / 1558.9074 / 1669.1467 / 1687.2785 / 1714.0357 |
 | ElasticSearch | ids_only | `r7i.4xlarge` | 139.2256 | 1581.7165 | 0.8378 | 0.7287 | 0.8598 | 0.0150 | 0.0212 | 1/10/20/40/60/80 | 119.3122 / 1106.0982 / 1552.4142 / 1581.7165 / 1574.0491 / 1579.6451 |
@@ -91,10 +115,13 @@ Vespa text completed in the 2026-06-04 rerun, but emitted backend timeout warnin
 
 ## HotpotQA Large (5.2M documents)
 
-Matrix rows used explicit concurrency `20,40,80`, `k=100`, and `concurrency_duration=30`. Payload `ids_only` returns ids only; payload `text` returns ids plus text payload.
+Historical matrix rows used explicit concurrency `20,40,80`; the 2026-06-21 math-GT ids-only rows used `1,10,20,40,60,80`. All rows used `k=100` and `concurrency_duration=30`. Payload `ids_only` returns ids only; payload `text` returns ids plus text payload.
 
 | Backend | Payload | Context | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 302.1242 | 784.9749 | 0.9127 | 0.0000 | n/a | 0.0450 | 0.0672 | 1/10/20/40/60/80 | 46.2159 / 477.6217 / 745.7581 / 776.9463 / 781.7123 / 784.9749 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 256.6338 | 659.2480 | 0.8553 | 0.0000 | n/a | 0.0570 | 0.0851 | 1/10/20/40/60/80 | 38.6843 / 408.8350 / 622.3226 / 659.1277 / 656.1379 / 659.2480 |
+| Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 1187.6098 | 176.2716 | 0.5727 | 0.0000 | n/a | 0.4443 | 0.4450 | 1/10/20/40/60/80 | 2.4158 / 25.1704 / 48.4437 / 90.4134 / 132.7175 / 176.2716 |
 | ElasticSearch | ids_only | `r7i.4xlarge` | 550.6164 | 476.2610 | 0.7637 | 0.6243 | 0.7549 | 0.0503 | 0.0755 | 1/5/10/20 | 41.0129 / 202.7703 / 356.3845 / 476.2610 |
 | ElasticSearch | text | `r7i.4xlarge` | 554.4492 | 435.1027 | 0.7637 | 0.6243 | 0.7549 | 0.0518 | 0.0766 | 20/40/80 | 402.3090 / 435.1027 / 434.3993 |
 | Milvus | ids_only | `r7i.4xlarge` | 10583.8485 | 394.4417 | 0.7573 | 0.6129 | 0.7410 | 0.0212 | 0.0299 | 1/5/10/20 | 88.1695 / 336.8579 / 388.2553 / 394.4417 |

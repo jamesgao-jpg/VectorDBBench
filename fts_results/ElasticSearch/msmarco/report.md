@@ -41,6 +41,19 @@ Rerun server machine:
 - Docker: Docker `24.0.5`, Docker Compose `v2.27.0`.
 - Role: runs the Elasticsearch container for the `r7i` rerun.
 
+<!-- BEGIN 20260621 MATH GT SERVER STATS -->
+
+Math-GT rerun server machine:
+
+- EC2 type: `i8g.4xlarge`.
+- OS: Ubuntu 22.04, Linux `6.8.0-1057-aws`, `aarch64`.
+- CPU: 16 vCPU, Neoverse-V2, 1 thread per core.
+- Memory: about 123 GiB RAM, no swap.
+- Disk quota: `/dev/root` ext4, 485 GiB total, 462 GiB available at verification.
+- Role: runs fresh Milvus, Elasticsearch, and Vespa server deployments for the 2026-06-21 math-GT ids-only rerun.
+
+<!-- END 20260621 MATH GT SERVER STATS -->
+
 ## Server Setup
 
 Validated deployment:
@@ -252,6 +265,61 @@ Effective Elasticsearch FTS case config from the raw JSON:
 - `use_ssl=false`
 - `verify_certs=true`
 
+<!-- BEGIN 20260621 MATH GT VDBBENCH SCRIPT -->
+
+Sanitized client script for the 2026-06-21 math-GT ids-only rerun:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/ubuntu/VectorDBBench
+export DATASET_LOCAL_DIR=/tmp/vectordb_bench/dataset
+export RESULTS_LOCAL_DIR=/tmp/vectordb_bench/results
+export NUM_PER_BATCH=100
+export SERVER_HOST="<server-private-host-or-dns>"
+export RUN_STAMP=20260621T150656Z
+export CONCURRENCY=1,10,20,40,60,80
+export CONCURRENCY_DURATION=30
+export CONCURRENCY_TIMEOUT=3600
+export LOAD_CONCURRENCY=0
+export K=100
+export PAYLOAD_PROFILE=ids_only
+
+DATASET_LABELS=(
+  "MS MARCO Small (100K documents)"
+  "MS MARCO Medium (1M documents)"
+  "MS MARCO Large (8.8M documents)"
+)
+
+for DATASET_LABEL in "${DATASET_LABELS[@]}"; do
+  case "${DATASET_LABEL}" in
+    *Small*) SIZE_KEY=small ;;
+    *Medium*) SIZE_KEY=medium ;;
+    *Large*) SIZE_KEY=large ;;
+  esac
+  TASK_LABEL="fts-matrix-elastic-msmarco-${SIZE_KEY}-ids-mathgt-${RUN_STAMP}"
+
+  python3.11 -m vectordb_bench.cli.vectordbbench elasticcloudhnsw \
+  --scheme http \
+  --host "${SERVER_HOST}" \
+  --port 9200 \
+  --password "<elastic-password>" \
+    --task-label "${TASK_LABEL}" \
+    --case-type FTSmsmarcoPerformance \
+    --dataset-with-size-type "${DATASET_LABEL}" \
+    --payload-profile "${PAYLOAD_PROFILE}" \
+    --drop-old --load --search-serial --search-concurrent \
+    --load-concurrency "${LOAD_CONCURRENCY}" \
+    --k "${K}" \
+    --concurrency-duration "${CONCURRENCY_DURATION}" \
+    --num-concurrency "${CONCURRENCY}" \
+    --concurrency-timeout "${CONCURRENCY_TIMEOUT}"
+done
+```
+
+<!-- END 20260621 MATH GT VDBBENCH SCRIPT -->
+
 ## Result
 
 | Task label | Dataset size | Load s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrent QPS at 1/5/10/20 |
@@ -308,3 +376,17 @@ MS MARCO Large observations:
 - ElasticSearch ids-only peaked at concurrency `40`; higher concurrency reduced QPS slightly.
 - Text-payload QPS was `952.0335`, which is 25.6% below ids-only at the same concurrency list.
 - Recall stayed unchanged at `0.6230`.
+
+<!-- BEGIN 20260621 MATH GT IDS ONLY -->
+
+### 2026-06-21 Math-GT ids-only rerun
+
+These rows use generated BM25 mathematical ground truth from `neighbors.parquet` instead of IR dataset qrels. The primary quality metric for this rerun is recall; the current JSONs emit `ndcg=0.0` and no `mrr` field. The JSON `inserted_count` field is `null`, so inserted count is intentionally not reported here.
+
+| Dataset size | Task label | Payload | Load s | Insert s | Optimize s | QPS | Recall | NDCG | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| MS MARCO Small (100K documents) | `fts-matrix-elastic-msmarco-small-ids-mathgt-20260621T150656Z` | ids_only | 34.5372 | 3.5575 | 30.9797 | 12792.5025 | 0.9416 | 0.0000 | 0.0023 | 0.0028 | 1/10/20/40/60/80 | 601.7296 / 5910.0014 / 9375.6363 / 11945.9017 / 12685.7963 / 12792.5025 |
+| MS MARCO Medium (1M documents) | `fts-matrix-elastic-msmarco-medium-ids-mathgt-20260621T150656Z` | ids_only | 64.7575 | 34.0057 | 30.7518 | 5852.4564 | 0.9366 | 0.0000 | 0.0062 | 0.0089 | 1/10/20/40/60/80 | 332.6692 / 3155.8439 / 4885.9889 / 5796.7833 / 5852.4564 / 5812.2195 |
+| MS MARCO Large (8.8M documents) | `fts-matrix-elastic-msmarco-large-ids-mathgt-20260621T150656Z` | ids_only | 439.0781 | 348.8843 | 90.1938 | 1713.7078 | 0.9304 | 0.0000 | 0.0283 | 0.0462 | 1/10/20/40/60/80 | 91.7264 / 1036.2800 / 1599.7248 / 1711.8981 / 1713.7078 / 1711.1540 |
+
+<!-- END 20260621 MATH GT IDS ONLY -->

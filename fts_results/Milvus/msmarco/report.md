@@ -376,6 +376,67 @@ MS MARCO Large observations:
 - Text payload QPS was `743.7173`, which is 0.7% above ids-only in this run; this is within the range where run-to-run variance can dominate the payload effect.
 - Recall stayed unchanged at `0.6206`.
 
+<!-- BEGIN 20260616 SEMANTIC QREL RERUN -->
+
+### 2026-06-16 i8g semantic/qrel rerun
+
+These rows are preserved as the last completed pre-math-GT rerun on the `i8g.4xlarge` server. They use the legacy IR-dataset qrel/semantic recall path and were produced before the 2026-06-21 parquet math-GT changes. Do not compare their recall values as the same recall contract as the `math GT 2026-06-21` rows.
+
+Run context:
+
+- Server environment: `i8g.4xlarge`, Ubuntu 22.04, `aarch64`, 16 vCPU, about 123 GiB RAM.
+- Client branch/head: `fts_impl_only@81905ec4cef9c5f85b2f20136dce15e8f911e013`.
+- Dataset source and ground truth path: `ir_datasets`; logs show `Loaded ground truth ... into memory` before the parquet ground-truth implementation landed.
+- Load concurrency: `8`.
+- Search concurrency: `1,10,20,40,60,80`.
+- Scope: completed Milvus `MS MARCO Large (8.8M documents)` ids-only and text-payload runs only.
+
+Sanitized client command shape:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/ubuntu/VectorDBBench
+export DATASET_LOCAL_DIR=/tmp/vectordb_bench/dataset
+export RESULTS_LOCAL_DIR=/home/ubuntu/VectorDBBench/vectordb_bench/results
+export NUM_PER_BATCH=100
+export SERVER_HOST="<server-private-host-or-dns>"
+export RUN_STAMP=20260616T101622Z
+export LOAD_CONCURRENCY=8
+export CONCURRENCY=1,10,20,40,60,80
+
+for PAYLOAD_PROFILE in ids_only text; do
+  if [[ "${PAYLOAD_PROFILE}" == "ids_only" ]]; then
+    LABEL_PAYLOAD=ids_only
+    PAYLOAD_ARGS=()
+  else
+    LABEL_PAYLOAD=text
+    PAYLOAD_ARGS=(--payload-profile text)
+  fi
+
+  python3.11 -m vectordb_bench.cli.vectordbbench milvusfts \
+    --uri "http://${SERVER_HOST}:19530" \
+    --task-label "fts_rerun_milvus_msmarco_large_${LABEL_PAYLOAD}_${RUN_STAMP}" \
+    --case-type FTSmsmarcoPerformance \
+    --dataset-with-size-type "MS MARCO Large (8.8M documents)" \
+    "${PAYLOAD_ARGS[@]}" \
+    --drop-old --load --search-serial --search-concurrent \
+    --load-concurrency "${LOAD_CONCURRENCY}" \
+    --k 100 \
+    --concurrency-duration 30 \
+    --num-concurrency "${CONCURRENCY}" \
+    --concurrency-timeout 3600
+done
+```
+
+| Task label | Payload | Load s | Insert s | Optimize s | QPS | Recall | NDCG | MRR | p95 s | p99 s | Concurrency | Concurrent QPS |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `fts_rerun_milvus_msmarco_large_ids_only_20260616T101622Z` | ids_only | 463.7911 | 182.7336 | 281.0574 | 1309.2858 | 0.6279 | 0.0000 | n/a | 0.0188 | 0.0287 | 1/10/20/40/60/80 | 119.0172 / 1024.5452 / 1213.7577 / 1280.3891 / 1288.6748 / 1309.2858 |
+| `fts_rerun_milvus_msmarco_large_text_20260616T101622Z` | text | 630.4357 | 182.4615 | 447.9742 | 1636.3888 | 0.6279 | 0.0000 | n/a | 0.0243 | 0.0374 | 1/10/20/40/60/80 | 91.4653 / 925.6603 / 1435.8955 / 1625.9694 / 1630.2646 / 1636.3888 |
+
+<!-- END 20260616 SEMANTIC QREL RERUN -->
+
 <!-- BEGIN 20260621 MATH GT IDS ONLY -->
 
 ### 2026-06-21 Math-GT ids-only rerun

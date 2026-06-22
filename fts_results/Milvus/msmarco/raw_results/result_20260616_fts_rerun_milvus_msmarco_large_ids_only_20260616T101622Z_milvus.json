@@ -1,0 +1,136 @@
+{
+  "run_id": "e27acd77815e4327a9cfb7f229cd95db",
+  "task_label": "fts_rerun_milvus_msmarco_large_ids_only_20260616T101622Z",
+  "results": [
+    {
+      "metrics": {
+        "max_load_count": 0,
+        "insert_duration": 182.7336,
+        "optimize_duration": 281.0574,
+        "load_duration": 463.7911,
+        "qps": 1309.2858,
+        "serial_latency_p99": 0.0287,
+        "serial_latency_p95": 0.0188,
+        "recall": 0.6279,
+        "ndcg": 0.0,
+        "conc_num_list": [
+          1,
+          10,
+          20,
+          40,
+          60,
+          80
+        ],
+        "conc_qps_list": [
+          119.0172,
+          1024.5452,
+          1213.7577,
+          1280.3891,
+          1288.6748,
+          1309.2858
+        ],
+        "conc_latency_p99_list": [
+          0.02871487834025174,
+          0.03171073436969894,
+          0.041433479133993395,
+          0.06453333957586446,
+          0.08182570674456656,
+          0.10134088241495198
+        ],
+        "conc_latency_p95_list": [
+          0.01832776656374335,
+          0.020650399161968376,
+          0.029018313391134143,
+          0.048536840430460866,
+          0.06702697986038401,
+          0.08238121706526726
+        ],
+        "conc_latency_avg_list": [
+          0.008398822370175092,
+          0.00974906241196847,
+          0.01643642399741862,
+          0.031034265383343564,
+          0.04597794656257666,
+          0.06006581981616371
+        ],
+        "payload_profile": "ids_only",
+        "payload_estimated_bytes_per_query": 2000,
+        "inserted_count": 0,
+        "insert_rows_per_second": 0.0,
+        "insert_completion_seconds": 0.0,
+        "searchable_after_insert_seconds": 0.0,
+        "indexed_after_searchable_seconds": 0.0,
+        "additional_parameters": {},
+        "st_ideal_insert_duration": 0,
+        "st_search_stage_list": [],
+        "st_search_time_list": [],
+        "st_max_qps_list_list": [],
+        "st_recall_list": [],
+        "st_ndcg_list": [],
+        "st_serial_latency_p99_list": [],
+        "st_serial_latency_p95_list": [],
+        "st_conc_failed_rate_list": [],
+        "st_conc_num_list_list": [],
+        "st_conc_qps_list_list": [],
+        "st_conc_latency_p99_list_list": [],
+        "st_conc_latency_p95_list_list": [],
+        "st_conc_latency_avg_list_list": []
+      },
+      "task_config": {
+        "db": "Milvus",
+        "db_config": {
+          "db_label": "2026-06-16T10:16:22.876738",
+          "version": "",
+          "note": "",
+          "uri": "**********",
+          "user": null,
+          "password": null,
+          "num_shards": 1,
+          "replica_number": 1
+        },
+        "db_case_config": {
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "metric_type": "BM25",
+          "inverted_index_algo": "DAAT_MAXSCORE",
+          "bm25_k1": null,
+          "bm25_b": null,
+          "analyzer_tokenizer": "standard",
+          "analyzer_enable_lowercase": true,
+          "analyzer_max_token_length": 40,
+          "analyzer_stop_words": null,
+          "drop_ratio_search": null
+        },
+        "case_config": {
+          "case_id": 503,
+          "custom_case": {
+            "dataset_with_size_type": "MS MARCO Large (8.8M documents)",
+            "payload_profile": "ids_only"
+          },
+          "k": 100,
+          "concurrency_search_config": {
+            "num_concurrency": [
+              1,
+              10,
+              20,
+              40,
+              60,
+              80
+            ],
+            "concurrency_duration": 30,
+            "concurrency_timeout": 3600
+          }
+        },
+        "stages": [
+          "drop_old",
+          "load",
+          "search_serial",
+          "search_concurrent"
+        ],
+        "load_concurrency": 8
+      },
+      "label": ":)"
+    }
+  ],
+  "file_fmt": "result_{}_{}_{}.json",
+  "timestamp": 1781568000.0
+}

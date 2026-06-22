@@ -1,0 +1,135 @@
+{
+  "run_id": "b7aeb4af7a414a2f9f5341cfcfd1f05d",
+  "task_label": "fts_rerun_elastic_msmarco_large_text_20260616T112000Z",
+  "results": [
+    {
+      "metrics": {
+        "max_load_count": 0,
+        "insert_duration": 243.1559,
+        "optimize_duration": 90.9596,
+        "load_duration": 334.1155,
+        "qps": 1253.0604,
+        "serial_latency_p99": 0.0474,
+        "serial_latency_p95": 0.0307,
+        "recall": 0.623,
+        "ndcg": 0.0,
+        "conc_num_list": [
+          1,
+          10,
+          20,
+          40,
+          60,
+          80
+        ],
+        "conc_qps_list": [
+          9.9555,
+          144.4961,
+          1140.3133,
+          1226.0161,
+          1251.269,
+          1253.0604
+        ],
+        "conc_latency_p99_list": [
+          0.16690297914203256,
+          0.3756714095245112,
+          0.05820587751455609,
+          0.09041382006369526,
+          0.10607460584957154,
+          0.13303127622231842
+        ],
+        "conc_latency_p95_list": [
+          0.14474744708277285,
+          0.2729558269027622,
+          0.038724844716489314,
+          0.062246943404898045,
+          0.07693405181635174,
+          0.09976309838239104
+        ],
+        "conc_latency_avg_list": [
+          0.10044026568167559,
+          0.0691586432391606,
+          0.017526666780167517,
+          0.032576479311172545,
+          0.04782105487065829,
+          0.06374154585173458
+        ],
+        "payload_profile": "text",
+        "payload_estimated_bytes_per_query": 53200,
+        "inserted_count": 0,
+        "insert_rows_per_second": 0.0,
+        "insert_completion_seconds": 0.0,
+        "searchable_after_insert_seconds": 0.0,
+        "indexed_after_searchable_seconds": 0.0,
+        "additional_parameters": {},
+        "st_ideal_insert_duration": 0,
+        "st_search_stage_list": [],
+        "st_search_time_list": [],
+        "st_max_qps_list_list": [],
+        "st_recall_list": [],
+        "st_ndcg_list": [],
+        "st_serial_latency_p99_list": [],
+        "st_serial_latency_p95_list": [],
+        "st_conc_failed_rate_list": [],
+        "st_conc_num_list_list": [],
+        "st_conc_qps_list_list": [],
+        "st_conc_latency_p99_list_list": [],
+        "st_conc_latency_p95_list_list": [],
+        "st_conc_latency_avg_list_list": []
+      },
+      "task_config": {
+        "db": "ElasticCloud",
+        "db_config": {
+          "db_label": "2026-06-16T11:32:37.696505",
+          "version": "",
+          "note": "",
+          "cloud_id": null,
+          "scheme": "http",
+          "host": "**********",
+          "port": 9200,
+          "user": "elastic",
+          "user_name": null,
+          "password": "**********",
+          "use_ssl": false,
+          "verify_certs": true
+        },
+        "db_case_config": {
+          "number_of_shards": 1,
+          "number_of_replicas": 0,
+          "refresh_interval": "30s",
+          "use_force_merge": true,
+          "metric_type": "BM25"
+        },
+        "case_config": {
+          "case_id": 503,
+          "custom_case": {
+            "dataset_with_size_type": "MS MARCO Large (8.8M documents)",
+            "payload_profile": "text"
+          },
+          "k": 100,
+          "concurrency_search_config": {
+            "num_concurrency": [
+              1,
+              10,
+              20,
+              40,
+              60,
+              80
+            ],
+            "concurrency_duration": 30,
+            "concurrency_timeout": 3600
+          }
+        },
+        "stages": [
+          "drop_old",
+          "load",
+          "search_serial",
+          "search_concurrent"
+        ],
+        "load_concurrency": 8
+      },
+      "label": ":)"
+    }
+  ],
+  "file_fmt": "result_{}_{}_{}.json",
+  "timestamp": 1781568000.0
+}

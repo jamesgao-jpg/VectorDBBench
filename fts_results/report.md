@@ -4,6 +4,12 @@ This report compares the latest committed representative result for each backend
 
 All local-server rows use the `r7i.4xlarge` server unless marked otherwise. TurboPuffer is a managed external backend, so its row is not directly comparable on server hardware. `Load s` is the VectorDBBench load duration. `QPS`, `p95 s`, and `p99 s` are from the search result in the raw JSON. Each row states its payload profile and concurrency list explicitly.
 
+<!-- BEGIN 20260616 SEMANTIC QREL NOTE -->
+
+Rows with context `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 are the completed pre-math-GT Milvus/ElasticSearch large-dataset reruns from `fts_impl_only@81905ec`. They use the legacy IR-dataset qrel/semantic recall path, so their recall values are not the same measurement contract as rows labeled `math GT 2026-06-21`. Vespa did not complete a corresponding committed result JSON in that rerun and is intentionally omitted.
+
+<!-- END 20260616 SEMANTIC QREL NOTE -->
+
 <!-- BEGIN 20260621 MATH GT NOTE -->
 
 Rows with context `i8g.4xlarge`, math GT 2026-06-21 use generated BM25 mathematical ground truth from `neighbors.parquet` instead of IR dataset qrels. For those rows, recall is the primary quality metric; `NDCG` is the JSON-emitted `0.0`, and `MRR` is `n/a` because the result JSONs do not include MRR.
@@ -76,6 +82,10 @@ Rows below include the 2026-06-04/2026-06-05 six-concurrency run and the 2026-06
 | Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 495.1239 | 1351.2833 | 0.9910 | 0.0000 | n/a | 0.0176 | 0.0269 | 1/10/20/40/60/80 | 124.6555 / 1045.9747 / 1226.9505 / 1289.9100 / 1343.4557 / 1351.2833 |
 | ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 439.0781 | 1713.7078 | 0.9304 | 0.0000 | n/a | 0.0283 | 0.0462 | 1/10/20/40/60/80 | 91.7264 / 1036.2800 / 1599.7248 / 1711.8981 / 1713.7078 / 1711.1540 |
 | Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 2011.2197 | 194.8595 | 0.6907 | 0.0000 | n/a | 0.4443 | 0.4448 | 1/10/20/40/60/80 | 2.8601 / 38.1890 / 61.7164 / 108.3861 / 153.9399 / 194.8595 |
+| Milvus | ids_only | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 463.7911 | 1309.2858 | 0.6279 | 0.0000 | n/a | 0.0188 | 0.0287 | 1/10/20/40/60/80 | 119.0172 / 1024.5452 / 1213.7577 / 1280.3891 / 1288.6748 / 1309.2858 |
+| Milvus | text | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 630.4357 | 1636.3888 | 0.6279 | 0.0000 | n/a | 0.0243 | 0.0374 | 1/10/20/40/60/80 | 91.4653 / 925.6603 / 1435.8955 / 1625.9694 / 1630.2646 / 1636.3888 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 360.3714 | 1789.5592 | 0.6228 | 0.0000 | n/a | 0.0268 | 0.0433 | 1/10/20/40/60/80 | 90.7488 / 1018.0375 / 1623.0575 / 1717.3223 / 1789.5592 / 1767.1579 |
+| ElasticSearch | text | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 334.1155 | 1253.0604 | 0.6230 | 0.0000 | n/a | 0.0307 | 0.0474 | 1/10/20/40/60/80 | 9.9555 / 144.4961 / 1140.3133 / 1226.0161 / 1251.2690 / 1253.0604 |
 | Milvus | ids_only | `r7i.4xlarge` | 17874.1539 | 738.2857 | 0.6206 | 0.2695 | 0.1824 | 0.0091 | 0.0133 | 1/10/20/40/60/80 | 203.7730 / 701.5716 / 707.9453 / 722.6776 / 735.3773 / 738.2857 |
 | Milvus | text | `r7i.4xlarge` | 17864.1118 | 743.7173 | 0.6206 | 0.2695 | 0.1824 | 0.0099 | 0.0140 | 1/10/20/40/60/80 | 189.9733 / 700.0473 / 692.9175 / 730.2865 / 735.8742 / 743.7173 |
 | ElasticSearch | ids_only | `r7i.4xlarge` | 991.9284 | 1279.2869 | 0.6230 | 0.2733 | 0.1862 | 0.0243 | 0.0389 | 1/10/20/40/60/80 | 92.4571 / 899.7783 / 1217.7168 / 1279.2869 / 1240.2423 / 1202.4733 |
@@ -122,6 +132,10 @@ Historical matrix rows used explicit concurrency `20,40,80`; the 2026-06-21 math
 | Milvus | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 302.1242 | 784.9749 | 0.9127 | 0.0000 | n/a | 0.0450 | 0.0672 | 1/10/20/40/60/80 | 46.2159 / 477.6217 / 745.7581 / 776.9463 / 781.7123 / 784.9749 |
 | ElasticSearch | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 256.6338 | 659.2480 | 0.8553 | 0.0000 | n/a | 0.0570 | 0.0851 | 1/10/20/40/60/80 | 38.6843 / 408.8350 / 622.3226 / 659.1277 / 656.1379 / 659.2480 |
 | Vespa | ids_only | `i8g.4xlarge`, math GT 2026-06-21 | 1187.6098 | 176.2716 | 0.5727 | 0.0000 | n/a | 0.4443 | 0.4450 | 1/10/20/40/60/80 | 2.4158 / 25.1704 / 48.4437 / 90.4134 / 132.7175 / 176.2716 |
+| Milvus | ids_only | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 315.2651 | 782.8244 | 0.7673 | 0.0000 | n/a | 0.0450 | 0.0674 | 1/10/20/40/60/80 | 45.9053 / 471.7161 / 743.6551 / 769.3053 / 782.8244 / 779.0495 |
+| Milvus | text | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 303.2773 | 791.0526 | 0.7673 | 0.0000 | n/a | 0.0441 | 0.0659 | 1/10/20/40/60/80 | 47.1694 / 474.1473 / 749.5954 / 781.3073 / 789.7035 / 791.0526 |
+| ElasticSearch | ids_only | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 211.0087 | 685.6198 | 0.7637 | 0.0000 | n/a | 0.0540 | 0.0804 | 1/10/20/40/60/80 | 41.9719 / 414.9978 / 650.3724 / 682.7910 / 683.6943 / 685.6198 |
+| ElasticSearch | text | `i8g.4xlarge`, semantic/qrel recall, 2026-06-16 | 209.8852 | 602.5509 | 0.7637 | 0.0000 | n/a | 0.0573 | 0.0842 | 1/10/20/40/60/80 | 12.5968 / 337.1613 / 563.9477 / 590.6620 / 591.3812 / 602.5509 |
 | ElasticSearch | ids_only | `r7i.4xlarge` | 550.6164 | 476.2610 | 0.7637 | 0.6243 | 0.7549 | 0.0503 | 0.0755 | 1/5/10/20 | 41.0129 / 202.7703 / 356.3845 / 476.2610 |
 | ElasticSearch | text | `r7i.4xlarge` | 554.4492 | 435.1027 | 0.7637 | 0.6243 | 0.7549 | 0.0518 | 0.0766 | 20/40/80 | 402.3090 / 435.1027 / 434.3993 |
 | Milvus | ids_only | `r7i.4xlarge` | 10583.8485 | 394.4417 | 0.7573 | 0.6129 | 0.7410 | 0.0212 | 0.0299 | 1/5/10/20 | 88.1695 / 336.8579 / 388.2553 / 394.4417 |

@@ -74,9 +74,7 @@ def welcomePrams(st):
         },
         {
             "title": "Tables",
-            "description": (
-                "<span style='font-size: 17px;'>View results for different datasets in tables.</span>"
-            ),
+            "description": ("<span style='font-size: 17px;'>View results for different datasets in tables.</span>"),
             "image": "fig/homepage/table.png",
             "link": "tables",
         },
@@ -93,9 +91,7 @@ def welcomePrams(st):
         {
             "title": "Concurrent Performance",
             "description": (
-                "<span style='font-size: 17px;'>"
-                "View how QPS and latency change across concurrency levels."
-                "</span>"
+                "<span style='font-size: 17px;'>" "View how QPS and latency change across concurrency levels." "</span>"
             ),
             "image": "fig/homepage/concurrent.png",
             "link": "concurrent",
@@ -103,9 +99,7 @@ def welcomePrams(st):
         {
             "title": "Label Filter Performance",
             "description": (
-                "<span style='font-size: 17px;'>"
-                "View dataset performance across label-filter ratios."
-                "</span>"
+                "<span style='font-size: 17px;'>" "View dataset performance across label-filter ratios." "</span>"
             ),
             "image": "fig/homepage/label_filter.png",
             "link": "label_filter",
@@ -113,9 +107,7 @@ def welcomePrams(st):
         {
             "title": "Int Filter Performance",
             "description": (
-                "<span style='font-size: 17px;'>"
-                "View dataset performance across integer-filter ratios."
-                "</span>"
+                "<span style='font-size: 17px;'>" "View dataset performance across integer-filter ratios." "</span>"
             ),
             "image": "fig/homepage/label_filter.png",
             "link": "int_filter",
@@ -123,9 +115,7 @@ def welcomePrams(st):
         {
             "title": "Streaming Performance",
             "description": (
-                "<span style='font-size: 17px;'>"
-                "View performance across search stages and insertion rates."
-                "</span>"
+                "<span style='font-size: 17px;'>" "View performance across search stages and insertion rates." "</span>"
             ),
             "image": "fig/homepage/streaming.png",
             "link": "streaming",

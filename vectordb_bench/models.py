@@ -583,14 +583,11 @@ class TestResult(BaseModel):
             "label",
         )
         SPLIT = DATA_FORMAT % tuple(map(lambda x: "-" * x, LENGTH))  # noqa: C417, N806
-        SUMMARY_FORMAT = (
-            ("Task summary: run_id=%s, task_label=%s")
-            % (  # noqa: N806
-                self.run_id[:5],
-                self.task_label,
-            )
+        summary_format = ("Task summary: run_id=%s, task_label=%s") % (
+            self.run_id[:5],
+            self.task_label,
         )
-        fmt = [SUMMARY_FORMAT, TITLE, SPLIT]
+        fmt = [summary_format, TITLE, SPLIT]
 
         for f in filtered_results:
             fmt.append(

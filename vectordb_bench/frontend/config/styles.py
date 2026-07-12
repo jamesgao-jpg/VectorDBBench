@@ -47,6 +47,7 @@ DB_ICON_MIME_TYPES = {
     ".svg": "image/svg+xml",
 }
 
+
 @lru_cache
 def getDbIconAsset(file_name: str) -> str:
     icon_path = DB_ICON_DIR / file_name

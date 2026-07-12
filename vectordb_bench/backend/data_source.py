@@ -232,9 +232,7 @@ class AwsS3Reader(DatasetReader):
                 reporter.emit(current, f"Downloading {_file_name}")
 
             callback = (
-                Callback(hooks={"progress": report_file_progress})
-                if progress_callback is not None
-                else Callback()
+                Callback(hooks={"progress": report_file_progress}) if progress_callback is not None else Callback()
             )
             try:
                 self.fs.get_file(s3_file.as_posix(), partial_file.as_posix(), callback=callback)

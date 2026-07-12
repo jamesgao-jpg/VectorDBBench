@@ -117,10 +117,19 @@ class BenchMarkRunner:
 
     def _try_get_signal(self):
         while self.receive_conn and self.receive_conn.poll():
-            sig, received = self.receive_conn.recv()
+            try:
+                sig, received = self.receive_conn.recv()
+            except EOFError:
+                msg = "Benchmark process ended without a completion signal."
+                log.warning(msg)
+                self.latest_error = msg
+                self._set_terminal_progress(ProgressStatus.FAILED, msg)
+                self._clear_running_task()
+                break
             log.debug(f"Sigal received to process: {sig}, {received}")
             if sig == SIGNAL.ERROR:
-                self.latest_error = received
+                self.latest_error = str(received)
+                self._set_terminal_progress(ProgressStatus.FAILED, self.latest_error)
                 self._clear_running_task()
             elif sig == SIGNAL.SUCCESS:
                 global global_result_future
@@ -144,7 +153,8 @@ class BenchMarkRunner:
 
     def stop_running(self):
         """force stop if ther're running benchmarks"""
-        self._clear_running_task(clear_progress=True)
+        self._set_terminal_progress(ProgressStatus.CANCELLED, "Benchmark cancelled")
+        self._clear_running_task()
 
     def get_progress(self) -> ProgressUpdate | None:
         """Return the latest progress snapshot received from the controller."""
@@ -187,6 +197,7 @@ class BenchMarkRunner:
 
             c_results = []
             latest_loaded_reuse_key, cached_load_duration = None, None
+            pending_finalize: tuple[int, int, float] | None = None
             progress_send_lock = threading.Lock()
 
             def send_progress(update: ProgressUpdate) -> None:
@@ -255,21 +266,24 @@ class BenchMarkRunner:
                     c_results.append(case_res)
                     send_conn.send((SIGNAL.WIP, idx))
                     if case_succeeded:
-                        completed_at = time.time()
-                        send_progress(
-                            ProgressUpdate(
-                                run_id=running_task.run_id,
-                                case_index=idx,
-                                case_total=num_cases,
-                                stage=ProgressStage.FINALIZE,
-                                stage_index=len(ProgressStage) - 1,
-                                stage_total=len(ProgressStage),
-                                status=ProgressStatus.COMPLETED,
-                                message="Benchmark result prepared",
-                                started_at=finalize_started_at,
-                                updated_at=completed_at,
+                        if idx == num_cases - 1:
+                            pending_finalize = (idx, num_cases, finalize_started_at)
+                        else:
+                            completed_at = time.time()
+                            send_progress(
+                                ProgressUpdate(
+                                    run_id=running_task.run_id,
+                                    case_index=idx,
+                                    case_total=num_cases,
+                                    stage=ProgressStage.FINALIZE,
+                                    stage_index=len(ProgressStage) - 1,
+                                    stage_total=len(ProgressStage),
+                                    status=ProgressStatus.COMPLETED,
+                                    message="Benchmark result prepared",
+                                    started_at=finalize_started_at,
+                                    updated_at=completed_at,
+                                )
                             )
-                        )
 
             test_result = TestResult(
                 run_id=running_task.run_id,
@@ -278,6 +292,24 @@ class BenchMarkRunner:
             )
             test_result.display()
             test_result.flush()
+
+            if pending_finalize is not None:
+                idx, num_cases, finalize_started_at = pending_finalize
+                completed_at = time.time()
+                send_progress(
+                    ProgressUpdate(
+                        run_id=running_task.run_id,
+                        case_index=idx,
+                        case_total=num_cases,
+                        stage=ProgressStage.FINALIZE,
+                        stage_index=len(ProgressStage) - 1,
+                        stage_total=len(ProgressStage),
+                        status=ProgressStatus.COMPLETED,
+                        message="Benchmark result saved",
+                        started_at=finalize_started_at,
+                        updated_at=completed_at,
+                    )
+                )
 
             send_conn.send((SIGNAL.SUCCESS, None))
             send_conn.close()
@@ -292,6 +324,18 @@ class BenchMarkRunner:
             send_conn.send((SIGNAL.ERROR, err_msg))
             send_conn.close()
             return
+
+    def _set_terminal_progress(self, status: ProgressStatus, message: str) -> None:
+        if self.latest_progress is None:
+            return
+
+        self.latest_progress = self.latest_progress.model_copy(
+            update={
+                "status": status,
+                "message": message,
+                "updated_at": time.time(),
+            }
+        )
 
     def _clear_running_task(self, clear_progress: bool = False):
         global global_result_future

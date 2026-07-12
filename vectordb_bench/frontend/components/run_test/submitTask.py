@@ -6,7 +6,24 @@ from vectordb_bench import config
 from vectordb_bench.frontend.components.run_test.taskProgress import render_task_progress
 from vectordb_bench.frontend.config import styles
 from vectordb_bench.interface import benchmark_runner
-from vectordb_bench.models import TaskConfig
+from vectordb_bench.models import ProgressStatus, TaskConfig
+
+TERMINAL_PROGRESS_STATUSES = {
+    ProgressStatus.COMPLETED,
+    ProgressStatus.FAILED,
+    ProgressStatus.CANCELLED,
+}
+
+
+def _is_terminal_progress(progress: object | None) -> bool:
+    if progress is None:
+        return False
+
+    status = progress.get("status") if isinstance(progress, dict) else getattr(progress, "status", None)
+    try:
+        return ProgressStatus(status) in TERMINAL_PROGRESS_STATUSES
+    except (TypeError, ValueError):
+        return False
 
 
 def submitTask(container, tasks, isAllValid):
@@ -95,10 +112,11 @@ def controlPanel(container, tasks: list[TaskConfig], taskLabel, isAllValid):
 
     @st.fragment(run_every=f"{styles.MAX_AUTO_REFRESH_INTERVAL / 1000}s")
     def _renderLiveStatus():
-        if benchmark_runner.has_running():
+        is_running = benchmark_runner.has_running()
+        progress = benchmark_runner.get_progress()
+        if is_running:
             currentTaskId = benchmark_runner.get_current_task_id()
             tasksCount = benchmark_runner.get_tasks_count()
-            progress = benchmark_runner.get_progress()
             if progress is None:
                 progress = {
                     "run_id": "",
@@ -128,6 +146,8 @@ def controlPanel(container, tasks: list[TaskConfig], taskLabel, isAllValid):
                 key="stop-btn",
             )
         else:
+            if _is_terminal_progress(progress):
+                render_task_progress(st, progress)
             errorText = benchmark_runner.latest_error or ""
             if len(errorText) > 0:
                 st.error(errorText)

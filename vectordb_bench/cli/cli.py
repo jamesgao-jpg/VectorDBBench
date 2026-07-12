@@ -277,9 +277,7 @@ def copy_fts_compatible_db_case_fields(source: DBCaseConfig, target: DBCaseConfi
         "level",
     )
     updates = {
-        field: getattr(source, field)
-        for field in preserved_fields
-        if hasattr(source, field) and hasattr(target, field)
+        field: getattr(source, field) for field in preserved_fields if hasattr(source, field) and hasattr(target, field)
     }
     if not updates:
         return target

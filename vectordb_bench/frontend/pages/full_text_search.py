@@ -188,7 +188,9 @@ def _filter_data(st: Any, data: pd.DataFrame) -> pd.DataFrame:
             key="fts-standard-datasets",
         )
         backend_options = [backend for backend in BACKEND_ORDER if backend in set(data["backend"].astype(str))]
-        selected_backends = st.multiselect("Backend", backend_options, default=backend_options, key="fts-standard-backends")
+        selected_backends = st.multiselect(
+            "Backend", backend_options, default=backend_options, key="fts-standard-backends"
+        )
         payloads = sorted(data["payload"].dropna().unique().tolist())
         default_payloads = ["ids_only"] if "ids_only" in payloads else payloads
         selected_payloads = st.multiselect("Payload", payloads, default=default_payloads, key="fts-standard-payloads")

@@ -79,7 +79,7 @@ class TestBenchRunner:
     def test_performance_case_whole(self):
         runner = BenchMarkRunner()
 
-        task_config=TaskConfig(
+        task_config = TaskConfig(
             db=DB.Milvus,
             db_config=DB.Milvus.config(),
             db_case_config=DB.Milvus.case_config_cls(index=IndexType.Flat)(),
@@ -94,7 +94,7 @@ class TestBenchRunner:
     def test_performance_case_clean(self):
         runner = BenchMarkRunner()
 
-        task_config=TaskConfig(
+        task_config = TaskConfig(
             db=DB.Milvus,
             db_config=DB.Milvus.config(),
             db_case_config=DB.Milvus.case_config_cls(index=IndexType.Flat)(),
@@ -106,7 +106,7 @@ class TestBenchRunner:
         runner.stop_running()
 
     def test_performance_case_no_error(self):
-        task_config=TaskConfig(
+        task_config = TaskConfig(
             db=DB.ZillizCloud,
             db_config=DB.ZillizCloud.config(uri="xxx", user="abc", password="1234"),
             db_case_config=DB.ZillizCloud.case_config_cls()(),
@@ -114,7 +114,7 @@ class TestBenchRunner:
         )
 
         t = task_config.copy()
-        d = t.json(exclude={'db_config': {'password', 'api_key'}})
+        d = t.json(exclude={"db_config": {"password", "api_key"}})
         log.info(f"{d}")
 
         loads = ujson.loads(d)
@@ -158,13 +158,16 @@ def test_benchmark_runner_reduces_progress_signal_to_latest_snapshot():
     assert running_task.finished == [0]
 
 
-def test_stop_running_clears_stale_progress_snapshot():
+def test_stop_running_marks_progress_cancelled():
     runner = BenchMarkRunner()
     runner.latest_progress = _progress_update()
 
     runner.stop_running()
 
-    assert runner.get_progress() is None
+    progress = runner.get_progress()
+    assert progress is not None
+    assert progress.status == ProgressStatus.CANCELLED
+    assert progress.message == "Benchmark cancelled"
 
 
 def _case_runner(dataset, *, run_id="run-1") -> CaseRunner:

@@ -333,11 +333,19 @@ class CaseRunner(BaseModel):
                 raise ValueError(msg)
 
             if self.is_fts:
+                self._emit_progress(
+                    ProgressStage.SETUP,
+                    ProgressStatus.COMPLETED,
+                    "Benchmark configuration ready",
+                )
                 self._emit_progress(ProgressStage.DOWNLOAD, ProgressStatus.RUNNING, "Preparing dataset")
                 self.ca.dataset.prepare(self.dataset_source, filters=self.ca.filters)
-                self._emit_progress(ProgressStage.DOWNLOAD, ProgressStatus.COMPLETED, "Dataset prepared")
                 self.init_db(drop_old)
-                self._emit_progress(ProgressStage.SETUP, ProgressStatus.COMPLETED, "Benchmark target ready")
+                self._emit_progress(
+                    ProgressStage.DOWNLOAD,
+                    ProgressStatus.COMPLETED,
+                    "Dataset and benchmark target ready",
+                )
                 return
 
             self.init_db(drop_old)
@@ -483,6 +491,13 @@ class CaseRunner(BaseModel):
                 self._emit_progress(ProgressStage.INSERT, ProgressStatus.COMPLETED, "Existing dataset reused")
                 self._emit_progress(ProgressStage.OPTIMIZE, ProgressStatus.COMPLETED, "Existing index reused")
             if TaskStage.SEARCH_SERIAL in self.config.stages or TaskStage.SEARCH_CONCURRENT in self.config.stages:
+                if TaskStage.SEARCH_CONCURRENT in self.config.stages:
+                    next_search_stage = ProgressStage.SEARCH_CONCURRENT
+                    next_search_message = "Preparing concurrent search"
+                else:
+                    next_search_stage = ProgressStage.SEARCH_SERIAL
+                    next_search_message = "Preparing serial search"
+                self._emit_progress(next_search_stage, ProgressStatus.RUNNING, next_search_message)
                 self._init_search_runners()
                 if TaskStage.SEARCH_CONCURRENT in self.config.stages:
                     concurrency_total = len(self.config.case_config.concurrency_search_config.num_concurrency)
@@ -697,16 +712,17 @@ class CaseRunner(BaseModel):
             tuple[float, ...]: vector cases return recall, ndcg, p99, p95;
                 FTS cases return recall, p99, p95.
         """
+        if self.serial_search_runner is None:
+            if self.is_fts and getattr(self.ca.dataset, "recall_skipped", False):
+                log.warning(
+                    "Skipping FTS serial recall: %s",
+                    getattr(self.ca.dataset, "recall_skip_reason", "unknown"),
+                )
+                return (0.0, 0.0, 0.0, 0.0, 0.0)
+            msg = "serial search runner is not initialized"
+            raise RuntimeError(msg)
+
         try:
-            if self.serial_search_runner is None:
-                if self.is_fts and getattr(self.ca.dataset, "recall_skipped", False):
-                    log.warning(
-                        "Skipping FTS serial recall: %s",
-                        getattr(self.ca.dataset, "recall_skip_reason", "unknown"),
-                    )
-                    return (0.0, 0.0, 0.0, 0.0, 0.0)
-                msg = "serial search runner is not initialized"
-                raise RuntimeError(msg)
             results, _ = self.serial_search_runner.run()
         except Exception as e:
             log.warning(f"search error: {e!s}, {e}")

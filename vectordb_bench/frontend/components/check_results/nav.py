@@ -7,8 +7,8 @@ def NavToRunTest(st):
 
 
 def NavToQuriesPerDollar(st):
-    st.subheader("Compare qps with price.")
-    navClick = st.button("QP$ (Quries per Dollar) &nbsp;&nbsp;>")
+    st.subheader("Compare QPS with price.")
+    navClick = st.button("QP$ (Queries per Dollar) &nbsp;&nbsp;>")
     if navClick:
         st.switch_page("pages/quries_per_dollar.py")
 
@@ -23,9 +23,9 @@ def NavToPages(st):
     options = [
         {"name": "Run Test", "link": "run_test"},
         {"name": "Results", "link": "results"},
-        {"name": "Qps & Recall", "link": "qps_recall"},
+        {"name": "QPS & Recall", "link": "qps_recall"},
         {"name": "Full Text Search", "link": "full_text_search"},
-        {"name": "Quries Per Dollar", "link": "quries_per_dollar"},
+        {"name": "Queries Per Dollar", "link": "quries_per_dollar"},
         {"name": "Concurrent", "link": "concurrent"},
         {"name": "Label Filter", "link": "label_filter"},
         {"name": "Int Filter", "link": "int_filter"},

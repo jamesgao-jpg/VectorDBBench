@@ -62,11 +62,11 @@ def welcomePrams(st):
             "link": "results",
         },
         {
-            "title": "Quries Per Dollar",
+            "title": "Queries Per Dollar",
             "description": (
                 "<span style='font-size: 17px;'>"
-                "To view the results of quries per dollar.<br> "
-                "(similar to qps in Results) "
+                "Compare query throughput against database cost.<br>"
+                "Uses QPS results and configured pricing."
                 "</span>"
             ),
             "image": "fig/homepage/qp$.png",
@@ -75,13 +75,13 @@ def welcomePrams(st):
         {
             "title": "Tables",
             "description": (
-                "<span style='font-size: 17px;'>" "To view the results of differnt datasets in tables." "</span>"
+                "<span style='font-size: 17px;'>View results for different datasets in tables.</span>"
             ),
             "image": "fig/homepage/table.png",
             "link": "tables",
         },
         {
-            "title": "FullTextSearch Performance",
+            "title": "Full-text Search Performance",
             "description": (
                 "<span style='font-size: 17px;'>"
                 "To view BM25 full text search performance across datasets, payload modes, and backends."
@@ -94,7 +94,7 @@ def welcomePrams(st):
             "title": "Concurrent Performance",
             "description": (
                 "<span style='font-size: 17px;'>"
-                "To view the variation of qps with latency under different concurrent."
+                "View how QPS and latency change across concurrency levels."
                 "</span>"
             ),
             "image": "fig/homepage/concurrent.png",
@@ -104,7 +104,7 @@ def welcomePrams(st):
             "title": "Label Filter Performance",
             "description": (
                 "<span style='font-size: 17px;'>"
-                "To view the perfomance of datasets under different label filter ratios "
+                "View dataset performance across label-filter ratios."
                 "</span>"
             ),
             "image": "fig/homepage/label_filter.png",
@@ -114,7 +114,7 @@ def welcomePrams(st):
             "title": "Int Filter Performance",
             "description": (
                 "<span style='font-size: 17px;'>"
-                "To view the perfomance of datasets under different int filter ratios "
+                "View dataset performance across integer-filter ratios."
                 "</span>"
             ),
             "image": "fig/homepage/label_filter.png",
@@ -124,7 +124,7 @@ def welcomePrams(st):
             "title": "Streaming Performance",
             "description": (
                 "<span style='font-size: 17px;'>"
-                "To view the perfomance of datasets under different search stages and insertion rates. "
+                "View performance across search stages and insertion rates."
                 "</span>"
             ),
             "image": "fig/homepage/streaming.png",

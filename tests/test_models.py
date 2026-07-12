@@ -1,22 +1,36 @@
-import pytest
 import logging
-from vectordb_bench.models import (
-    TaskConfig, CaseConfig,
-    CaseResult, TestResult,
-    Metric, CaseType
-)
-from vectordb_bench.backend.clients import (
-    DB,
-    IndexType
-)
+from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 from vectordb_bench import config
-
+from vectordb_bench.backend.clients import DB, IndexType
+from vectordb_bench.models import (
+    CaseConfig,
+    CaseResult,
+    CaseType,
+    Metric,
+    TaskConfig,
+    TestResult,
+)
 
 log = logging.getLogger("vectordb_bench")
 
 
 class TestModels:
+    def test_test_result_reads_iso_timestamp(self, tmp_path: Path):
+        timestamp = "2026-07-09T08:02:27.004381+00:00"
+        result_file = tmp_path / "result_iso_timestamp.json"
+        result_file.write_text(
+            '{"run_id":"iso-timestamp","task_label":"iso-timestamp","results":[],"timestamp":"'
+            f'{timestamp}"}}'
+        )
+
+        result = TestResult.read_file(result_file)
+
+        assert result.timestamp == pytest.approx(datetime.fromisoformat(timestamp).timestamp())
+
     @pytest.mark.skip("runs locally")
     def test_test_result(self):
         result = CaseResult(

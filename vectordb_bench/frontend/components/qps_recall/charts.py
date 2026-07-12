@@ -1,12 +1,11 @@
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
 from vectordb_bench.frontend.components.check_results.expanderStyle import (
     initMainExpanderStyle,
 )
-from vectordb_bench.metric import metric_order, isLowerIsBetterMetric, metric_unit_map
-from vectordb_bench.frontend.config.styles import *
-import plotly.express as px
-import pandas as pd
-import plotly.graph_objects as go
-import matplotlib.pyplot as plt
+from vectordb_bench.metric import metric_order
 
 
 def drawCharts(st, allData, caseNames: list[str]):
@@ -69,12 +68,8 @@ def drawlinechart(st, data: list[object], metric, key: str):
     new_data, new_remain_data = drawBestperformance(data, y, group)
     unique_db_names = list(set(item["db_name"] for item in new_data + new_remain_data))
 
-    colors = plt.cm.get_cmap("tab10", len(unique_db_names))
-
-    color_map = {
-        db: f"rgb({int(colors(i)[0] * 255)}, {int(colors(i)[1] * 255)}, {int(colors(i)[2] * 255)})"
-        for i, db in enumerate(unique_db_names)
-    }
+    palette = px.colors.qualitative.Alphabet
+    color_map = {db: palette[i % len(palette)] for i, db in enumerate(unique_db_names)}
 
     fig = go.Figure()
 

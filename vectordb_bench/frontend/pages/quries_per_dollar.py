@@ -33,7 +33,7 @@ def main():
 
     allResults = benchmark_runner.get_results()
 
-    st.title("Vector DB Benchmark (QP$)")
+    st.title("Vector Database Benchmark (Queries per Dollar)")
 
     # results selector
     resultSelectorContainer = st.sidebar.container()
@@ -69,7 +69,13 @@ def main():
         if len(dataWithMetric) > 0:
             chartContainer = st.expander(caseName, True)
             key = f"{caseName}-{metric}"
-            drawMetricChart(data, metric, chartContainer, key=key)
+            drawMetricChart(
+                data,
+                metric,
+                chartContainer,
+                key=key,
+                title="QP$ (Queries per Dollar)",
+            )
 
     # footer
     footer(st.container())

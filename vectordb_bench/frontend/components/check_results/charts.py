@@ -73,7 +73,7 @@ def getLabelToShapeMap(data):
     return labelToShapeMap
 
 
-def drawMetricChart(data, metric, st, key: str):
+def drawMetricChart(data, metric, st, key: str, title: str | None = None):
     dataWithMetric = [d for d in data if d.get(metric, 0) > 1e-7]
     # dataWithMetric = data
     if len(dataWithMetric) == 0:
@@ -111,7 +111,7 @@ def drawMetricChart(data, metric, st, key: str):
         },
         color_discrete_map=COLOR_MAP,
         text_auto=True,
-        title=f"{metric.capitalize()} ({'less' if isLowerIsBetterMetric(metric) else 'more'} is better)",
+        title=f"{title or metric.capitalize()} ({'less' if isLowerIsBetterMetric(metric) else 'more'} is better)",
     )
     fig.update_xaxes(showticklabels=False, visible=False, range=xrange)
     fig.update_yaxes(

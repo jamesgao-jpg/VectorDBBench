@@ -1,11 +1,12 @@
 import logging
 import pathlib
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from enum import Enum, StrEnum
 from typing import Any, ClassVar, Self
 
 import ujson
+from pydantic import field_validator
 
 from vectordb_bench.backend.cases import type2case
 from vectordb_bench.backend.dataset import DatasetWithSizeMap
@@ -290,6 +291,22 @@ class TestResult(BaseModel):
     file_fmt: str = "result_{}_{}_{}.json"  # result_20230718_statndard_milvus.json
     timestamp: float = 0.0
     sensitive_output_fields: ClassVar[set[str]] = {"api_key", "password", "token"}
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def normalize_timestamp(cls, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.timestamp()
+        if not isinstance(value, str):
+            return value
+
+        try:
+            return float(value)
+        except ValueError:
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.timestamp()
 
     @classmethod
     def _redact_sensitive_fields(cls, value: Any) -> Any:

@@ -59,7 +59,7 @@ class Metric:
     st_conc_latency_avg_list_list: list[list[float]] = field(default_factory=list)
 
 
-QURIES_PER_DOLLAR_METRIC = "QP$ (Quries per Dollar)"
+QURIES_PER_DOLLAR_METRIC = "QP$ (Queries per Dollar)"
 LOAD_DURATION_METRIC = "load_duration"
 SERIAL_LATENCY_P99_METRIC = "serial_latency_p99"
 SERIAL_LATENCY_P95_METRIC = "serial_latency_p95"

@@ -1,11 +1,13 @@
 import logging
 import os
 import pathlib
+import time
 import typing
 from abc import ABC, abstractmethod
 from enum import Enum
 
 import ir_datasets
+from fsspec.callbacks import Callback
 from tqdm import tqdm
 
 from vectordb_bench import config
@@ -23,6 +25,29 @@ logging.getLogger("s3fs").setLevel(logging.CRITICAL)
 log = logging.getLogger(__name__)
 
 DatasetReader = typing.TypeVar("DatasetReader")
+ProgressCallback = typing.Callable[[int, int, str], None]
+
+
+class _ThrottledProgress:
+    def __init__(
+        self,
+        callback: ProgressCallback | None,
+        total: int,
+        interval_seconds: float = 0.25,
+    ):
+        self.callback = callback
+        self.total = total
+        self.interval_seconds = interval_seconds
+        self._last_emit = 0.0
+
+    def emit(self, current: int, message: str, *, force: bool = False):
+        if self.callback is None:
+            return
+
+        now = time.monotonic()
+        if force or now - self._last_emit >= self.interval_seconds:
+            self.callback(current, self.total, message)
+            self._last_emit = now
 
 
 class DatasetSource(Enum):
@@ -48,7 +73,13 @@ class DatasetReader(ABC):
     remote_root: str
 
     @abstractmethod
-    def read(self, dataset: str, files: list[str], local_ds_root: pathlib.Path):
+    def read(
+        self,
+        dataset: str,
+        files: list[str],
+        local_ds_root: pathlib.Path,
+        progress_callback: ProgressCallback | None = None,
+    ):
         """read dataset files from remote_root to local_ds_root,
 
         Args:
@@ -82,35 +113,46 @@ class AliyunOSSReader(DatasetReader):
 
         return True
 
-    def read(self, dataset: str, files: list[str], local_ds_root: pathlib.Path):
+    def read(
+        self,
+        dataset: str,
+        files: list[str],
+        local_ds_root: pathlib.Path,
+        progress_callback: ProgressCallback | None = None,
+    ):
         downloads = []
+        completed_bytes = 0
+        total_bytes = 0
         if not local_ds_root.exists():
             log.info(f"local dataset root path not exist, creating it: {local_ds_root}")
             local_ds_root.mkdir(parents=True)
-            downloads = [
-                (
-                    pathlib.PurePosixPath("benchmark", dataset, f),
-                    local_ds_root.joinpath(f),
-                )
-                for f in files
-            ]
 
-        else:
-            for file in files:
-                remote_file = pathlib.PurePosixPath("benchmark", dataset, file)
-                local_file = local_ds_root.joinpath(file)
+        for file in files:
+            remote_file = pathlib.PurePosixPath("benchmark", dataset, file)
+            local_file = local_ds_root.joinpath(file)
+            remote_size = self.bucket.get_object_meta(remote_file.as_posix()).content_length
+            total_bytes += remote_size
 
-                if (not local_file.exists()) or (not self.validate_file(remote_file, local_file)):
-                    log.info(f"local file: {local_file} not match with remote: {remote_file}; add to downloading list")
-                    downloads.append((remote_file, local_file))
+            if local_file.exists() and local_file.stat().st_size == remote_size:
+                completed_bytes += remote_size
+                continue
+
+            log.info(f"local file: {local_file} not match with remote: {remote_file}; add to downloading list")
+            downloads.append((remote_file, local_file, remote_size))
+
+        reporter = _ThrottledProgress(progress_callback, total_bytes)
+        reporter.emit(completed_bytes, "Checking cached dataset files", force=True)
 
         if len(downloads) == 0:
+            reporter.emit(total_bytes, "Dataset files are ready", force=True)
             return
 
         log.info(f"Start to downloading files, total count: {len(downloads)}")
-        for remote_file, local_file in tqdm(downloads):
+        for remote_file, local_file, remote_size in tqdm(downloads):
             log.debug(f"downloading file {remote_file} to {local_file}")
             self.bucket.get_object_to_file(remote_file.as_posix(), local_file.absolute())
+            completed_bytes += remote_size
+            reporter.emit(completed_bytes, f"Downloaded {local_file.name}", force=True)
 
         log.info(f"Succeed to download all files, downloaded file count = {len(downloads)}")
 
@@ -132,29 +174,86 @@ class AwsS3Reader(DatasetReader):
             log.info(n)
         return names
 
-    def read(self, dataset: str, files: list[str], local_ds_root: pathlib.Path):
-        downloads = []
+    def read(
+        self,
+        dataset: str,
+        files: list[str],
+        local_ds_root: pathlib.Path,
+        progress_callback: ProgressCallback | None = None,
+    ):
+        downloads: list[tuple[pathlib.PurePosixPath, pathlib.Path, int]] = []
+        completed_bytes = 0
+        total_bytes = 0
         if not local_ds_root.exists():
             log.info(f"local dataset root path not exist, creating it: {local_ds_root}")
             local_ds_root.mkdir(parents=True)
-            downloads = [pathlib.PurePosixPath(self.remote_root, dataset, f) for f in files]
 
-        else:
-            for file in files:
-                remote_file = pathlib.PurePosixPath(self.remote_root, dataset, file)
-                local_file = local_ds_root.joinpath(file)
+        for file in files:
+            remote_file = pathlib.PurePosixPath(self.remote_root, dataset, file)
+            local_file = local_ds_root.joinpath(file)
+            remote_size = self.fs.info(remote_file).get("size")
+            if not isinstance(remote_size, int):
+                msg = f"Unable to determine remote file size: {remote_file}"
+                raise OSError(msg)
+            total_bytes += remote_size
 
-                if (not local_file.exists()) or (not self.validate_file(remote_file, local_file)):
-                    log.info(f"local file: {local_file} not match with remote: {remote_file}; add to downloading list")
-                    downloads.append(remote_file)
+            if local_file.exists() and local_file.stat().st_size == remote_size:
+                completed_bytes += remote_size
+                continue
+
+            log.info(f"local file: {local_file} not match with remote: {remote_file}; add to downloading list")
+            downloads.append((remote_file, local_file, remote_size))
+
+        reporter = _ThrottledProgress(progress_callback, total_bytes)
+        reporter.emit(completed_bytes, "Checking cached dataset files", force=True)
 
         if len(downloads) == 0:
+            reporter.emit(total_bytes, "Dataset files are ready", force=True)
             return
 
         log.info(f"Start to downloading files, total count: {len(downloads)}")
-        for s3_file in tqdm(downloads):
-            log.debug(f"downloading file {s3_file} to {local_ds_root}")
-            self.fs.download(s3_file, local_ds_root.as_posix())
+        for s3_file, local_file, remote_size in tqdm(downloads):
+            partial_file = local_file.with_name(f"{local_file.name}.part")
+            local_file.unlink(missing_ok=True)
+            partial_file.unlink(missing_ok=True)
+            log.debug(f"downloading file {s3_file} to {partial_file}")
+
+            file_start = completed_bytes
+
+            def report_file_progress(
+                _size: int | None,
+                value: int,
+                _file_start: int = file_start,
+                _remote_size: int = remote_size,
+                _file_name: str = local_file.name,
+                **_kwargs,
+            ):
+                current = min(_file_start + value, _file_start + _remote_size)
+                reporter.emit(current, f"Downloading {_file_name}")
+
+            callback = (
+                Callback(hooks={"progress": report_file_progress})
+                if progress_callback is not None
+                else Callback()
+            )
+            try:
+                self.fs.get_file(s3_file.as_posix(), partial_file.as_posix(), callback=callback)
+            except Exception:
+                partial_file.unlink(missing_ok=True)
+                raise
+
+            partial_size = partial_file.stat().st_size
+            if partial_size != remote_size:
+                partial_file.unlink(missing_ok=True)
+                msg = (
+                    f"downloaded file: {partial_file} size[{partial_size}] "
+                    f"not match with remote size[{remote_size}]"
+                )
+                raise OSError(msg)
+            partial_file.replace(local_file)
+
+            completed_bytes += remote_size
+            reporter.emit(completed_bytes, f"Downloaded {local_file.name}", force=True)
 
         log.info(f"Succeed to download all files, downloaded file count = {len(downloads)}")
 
@@ -180,7 +279,13 @@ class IRDatasetsReader(DatasetReader):
     def __init__(self):
         self.ir_datasets = ir_datasets
 
-    def read(self, dataset: str, files: list[str], local_ds_root: pathlib.Path):
+    def read(
+        self,
+        dataset: str,
+        files: list[str],
+        local_ds_root: pathlib.Path,
+        progress_callback: ProgressCallback | None = None,
+    ):
         """
         Download FTS dataset using ir_datasets API
 
@@ -190,6 +295,8 @@ class IRDatasetsReader(DatasetReader):
             local_ds_root: Local directory (not used, ir_datasets handles its own cache)
         """
         log.info(f"Downloading FTS dataset '{dataset}' using ir_datasets")
+        if progress_callback is not None:
+            progress_callback(0, 0, f"Loading dataset metadata for {dataset}")
 
         try:
             # Load dataset using ir_datasets - this will download if needed
@@ -197,6 +304,8 @@ class IRDatasetsReader(DatasetReader):
             # Actual data download happens lazily when iterating
             self.ir_datasets.load(dataset)
             log.info(f"Successfully loaded dataset: {dataset}")
+            if progress_callback is not None:
+                progress_callback(0, 0, f"Dataset metadata ready for {dataset}")
 
         except Exception:
             log.exception(f"Failed to download FTS dataset '{dataset}'")

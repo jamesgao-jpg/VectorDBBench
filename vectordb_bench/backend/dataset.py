@@ -26,7 +26,7 @@ from vectordb_bench.base import BaseModel
 
 from . import utils
 from .clients import MetricType
-from .data_source import DatasetReader, DatasetSource
+from .data_source import DatasetReader, DatasetSource, ProgressCallback
 from .filter import Filter, FilterOp, non_filter
 
 log = logging.getLogger(__name__)
@@ -357,6 +357,7 @@ class DatasetManager(BaseModel):
         filters: Filter = non_filter,
         with_train_files: bool = True,
         with_scalar_labels: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> bool:
         """Download the dataset from DatasetSource
          url = f"{source}/{self.data.dir_name}"
@@ -385,6 +386,7 @@ class DatasetManager(BaseModel):
                 dataset=self.data.dir_name.lower(),
                 files=download_files,
                 local_ds_root=self.data_dir,
+                progress_callback=progress_callback,
             )
 
         needs_scalar_labels = filters.type == FilterOp.StrEqual or with_scalar_labels
@@ -926,6 +928,7 @@ class FtsDatasetManager(BaseModel):
         self,
         source: DatasetSource | None = None,
         filters: Filter | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> bool:
         """Prepare FTS dataset for testing using Translator pattern.
 
@@ -951,7 +954,12 @@ class FtsDatasetManager(BaseModel):
                 if reader is not None:
                     dataset_name = self._translator.ir_datasets_name
                     # reader.read() will download the dataset if needed
-                    reader.read(dataset_name, [], self.data_dir)
+                    reader.read(
+                        dataset_name,
+                        [],
+                        self.data_dir,
+                        progress_callback=progress_callback,
+                    )
 
             # Load dataset using translator
             self._ir_dataset = self._translator.load()

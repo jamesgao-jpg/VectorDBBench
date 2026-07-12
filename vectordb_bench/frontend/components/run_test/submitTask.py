@@ -3,6 +3,7 @@ from datetime import datetime
 import streamlit as st
 
 from vectordb_bench import config
+from vectordb_bench.frontend.components.run_test.taskProgress import render_task_progress
 from vectordb_bench.frontend.config import styles
 from vectordb_bench.interface import benchmark_runner
 from vectordb_bench.models import TaskConfig
@@ -97,9 +98,21 @@ def controlPanel(container, tasks: list[TaskConfig], taskLabel, isAllValid):
         if benchmark_runner.has_running():
             currentTaskId = benchmark_runner.get_current_task_id()
             tasksCount = benchmark_runner.get_tasks_count()
-            text = f":running: Running Task {currentTaskId} / {tasksCount}"
-            if tasksCount > 0:
-                st.progress(currentTaskId / tasksCount, text=text)
+            progress = benchmark_runner.get_progress()
+            if progress is None:
+                progress = {
+                    "run_id": "",
+                    "case_index": currentTaskId,
+                    "case_total": tasksCount,
+                    "stage": "setup",
+                    "stage_index": 0,
+                    "stage_total": 7,
+                    "status": "running",
+                    "message": "Starting benchmark",
+                    "started_at": datetime.now(),
+                    "updated_at": datetime.now(),
+                }
+            render_task_progress(st, progress)
             cols = st.columns(6)
             cols[0].button(
                 "Run Your Test",

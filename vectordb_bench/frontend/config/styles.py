@@ -34,7 +34,8 @@ def getPatternShape(i):
 
 # run_test page auto-refresh config
 MAX_AUTO_REFRESH_COUNT = 999999
-MAX_AUTO_REFRESH_INTERVAL = 5000  # 5s
+MAX_AUTO_REFRESH_INTERVAL = 1500  # 1.5s
+TASK_PROGRESS_MIN_HEIGHT = 184
 
 PAGE_TITLE = "VectorDB Benchmark"
 FAVICON = "https://assets.zilliz.com/VDB_Bench_icon_d3276bedc4.png"

@@ -242,6 +242,40 @@ class TaskStage(StrEnum):
         return str.__repr__(self.value)
 
 
+class ProgressStage(StrEnum):
+    SETUP = "setup"
+    DOWNLOAD = "download"
+    INSERT = "insert"
+    OPTIMIZE = "optimize"
+    SEARCH_CONCURRENT = "search_concurrent"
+    SEARCH_SERIAL = "search_serial"
+    FINALIZE = "finalize"
+
+
+class ProgressStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ProgressUpdate(BaseModel):
+    run_id: str
+    case_index: int
+    case_total: int
+    stage: ProgressStage
+    stage_index: int
+    stage_total: int
+    status: ProgressStatus
+    message: str
+    current: int | float | None = None
+    total: int | float | None = None
+    unit: str | None = None
+    started_at: float
+    updated_at: float
+    duration_hint_seconds: float | None = None
+
+
 # TODO: Add CapacityCase enums and adjust TaskRunner to utilize
 ALL_TASK_STAGES = [
     TaskStage.DROP_OLD,
@@ -549,9 +583,12 @@ class TestResult(BaseModel):
             "label",
         )
         SPLIT = DATA_FORMAT % tuple(map(lambda x: "-" * x, LENGTH))  # noqa: C417, N806
-        SUMMARY_FORMAT = ("Task summary: run_id=%s, task_label=%s") % (  # noqa: N806
-            self.run_id[:5],
-            self.task_label,
+        SUMMARY_FORMAT = (
+            ("Task summary: run_id=%s, task_label=%s")
+            % (  # noqa: N806
+                self.run_id[:5],
+                self.task_label,
+            )
         )
         fmt = [SUMMARY_FORMAT, TITLE, SPLIT]
 

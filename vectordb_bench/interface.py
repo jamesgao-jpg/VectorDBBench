@@ -2,6 +2,8 @@ import concurrent.futures
 import logging
 import multiprocessing as mp
 import pathlib
+import threading
+import time
 import traceback
 import uuid
 from enum import Enum
@@ -18,6 +20,9 @@ from .models import (
     CaseResult,
     LoadTimeoutError,
     PerformanceTimeoutError,
+    ProgressStage,
+    ProgressStatus,
+    ProgressUpdate,
     ResultLabel,
     TaskConfig,
     TaskStage,
@@ -33,12 +38,15 @@ class SIGNAL(Enum):
     SUCCESS = 0
     ERROR = 1
     WIP = 2
+    PROGRESS = 3
 
 
 class BenchMarkRunner:
     def __init__(self):
         self.running_task: TaskRunner | None = None
         self.latest_error: str | None = None
+        self.latest_progress: ProgressUpdate | None = None
+        self.receive_conn: Connection | None = None
         self.drop_old: bool = True
         # set default data source by ENV
         if config.DATASET_SOURCE.upper() == "ALIYUNOSS":
@@ -71,6 +79,7 @@ class BenchMarkRunner:
             return False
 
         log.debug(f"tasks: {tasks}, task_label: {task_label}, dataset source: {self.dataset_source}")
+        self.latest_progress = None
 
         # Generate run_id
         run_id = uuid.uuid4().hex
@@ -120,6 +129,10 @@ class BenchMarkRunner:
                 self.receive_conn = None
             elif sig == SIGNAL.WIP:
                 self.running_task.set_finished(received)
+            elif sig == SIGNAL.PROGRESS:
+                self.latest_progress = (
+                    received if isinstance(received, ProgressUpdate) else ProgressUpdate.model_validate(received)
+                )
             else:
                 self._clear_running_task()
 
@@ -131,7 +144,13 @@ class BenchMarkRunner:
 
     def stop_running(self):
         """force stop if ther're running benchmarks"""
-        self._clear_running_task()
+        self._clear_running_task(clear_progress=True)
+
+    def get_progress(self) -> ProgressUpdate | None:
+        """Return the latest progress snapshot received from the controller."""
+        if self.running_task:
+            self._try_get_signal()
+        return self.latest_progress
 
     def get_tasks_count(self) -> int:
         """the count of all tasks"""
@@ -161,14 +180,22 @@ class BenchMarkRunner:
             global_result_future = None
             self.running_task = None
 
-    def _async_task_v2(self, running_task: TaskRunner, send_conn: Connection) -> None:
+    def _async_task_v2(self, running_task: TaskRunner, send_conn: Connection) -> None:  # noqa: PLR0915
         try:
             if not running_task:
                 return
 
             c_results = []
             latest_loaded_reuse_key, cached_load_duration = None, None
+            progress_send_lock = threading.Lock()
+
+            def send_progress(update: ProgressUpdate) -> None:
+                with progress_send_lock:
+                    send_conn.send((SIGNAL.PROGRESS, update))
+
             for idx, runner in enumerate(running_task.case_runners):
+                num_cases = running_task.num_cases()
+                runner.set_progress_callback(send_progress, case_index=idx, case_total=num_cases)
                 case_res = CaseResult(
                     metrics=Metric(),
                     task_config=runner.config,
@@ -180,12 +207,29 @@ class BenchMarkRunner:
                     drop_old = False
                 if not self.drop_old:
                     drop_old = False
-                num_cases = running_task.num_cases()
+                finalize_started_at = 0.0
+                case_succeeded = False
                 try:
-                    log.info(f"[{idx+1}/{num_cases}] start case: {runner.display()}, drop_old={drop_old}")
+                    log.info(f"[{idx + 1}/{num_cases}] start case: {runner.display()}, drop_old={drop_old}")
                     case_res.metrics = runner.run(drop_old)
+                    case_succeeded = True
+                    finalize_started_at = time.time()
+                    send_progress(
+                        ProgressUpdate(
+                            run_id=running_task.run_id,
+                            case_index=idx,
+                            case_total=num_cases,
+                            stage=ProgressStage.FINALIZE,
+                            stage_index=len(ProgressStage) - 1,
+                            stage_total=len(ProgressStage),
+                            status=ProgressStatus.RUNNING,
+                            message="Preparing benchmark result",
+                            started_at=finalize_started_at,
+                            updated_at=finalize_started_at,
+                        )
+                    )
                     log.info(
-                        f"[{idx+1}/{num_cases}] finish case: {runner.display()}, "
+                        f"[{idx + 1}/{num_cases}] finish case: {runner.display()}, "
                         f"result={case_res.metrics}, label={case_res.label}"
                     )
 
@@ -197,12 +241,12 @@ class BenchMarkRunner:
                     if not drop_old and reuse_key is not None and reuse_key == latest_loaded_reuse_key:
                         case_res.metrics.load_duration = cached_load_duration if cached_load_duration else 0.0
                 except (LoadTimeoutError, PerformanceTimeoutError) as e:
-                    log.warning(f"[{idx+1}/{num_cases}] case {runner.display()} failed to run, reason={e}")
+                    log.warning(f"[{idx + 1}/{num_cases}] case {runner.display()} failed to run, reason={e}")
                     case_res.label = ResultLabel.OUTOFRANGE
                     continue
 
                 except Exception as e:
-                    log.warning(f"[{idx+1}/{num_cases}] case {runner.display()} failed to run, reason={e}")
+                    log.warning(f"[{idx + 1}/{num_cases}] case {runner.display()} failed to run, reason={e}")
                     traceback.print_exc()
                     case_res.label = ResultLabel.FAILED
                     continue
@@ -210,6 +254,22 @@ class BenchMarkRunner:
                 finally:
                     c_results.append(case_res)
                     send_conn.send((SIGNAL.WIP, idx))
+                    if case_succeeded:
+                        completed_at = time.time()
+                        send_progress(
+                            ProgressUpdate(
+                                run_id=running_task.run_id,
+                                case_index=idx,
+                                case_total=num_cases,
+                                stage=ProgressStage.FINALIZE,
+                                stage_index=len(ProgressStage) - 1,
+                                stage_total=len(ProgressStage),
+                                status=ProgressStatus.COMPLETED,
+                                message="Benchmark result prepared",
+                                started_at=finalize_started_at,
+                                updated_at=completed_at,
+                            )
+                        )
 
             test_result = TestResult(
                 run_id=running_task.run_id,
@@ -233,7 +293,7 @@ class BenchMarkRunner:
             send_conn.close()
             return
 
-    def _clear_running_task(self):
+    def _clear_running_task(self, clear_progress: bool = False):
         global global_result_future
         global_result_future = None
 
@@ -248,6 +308,9 @@ class BenchMarkRunner:
         if self.receive_conn:
             self.receive_conn.close()
             self.receive_conn = None
+
+        if clear_progress:
+            self.latest_progress = None
 
     def _run_async(self, conn: Connection) -> bool:
         log.info(

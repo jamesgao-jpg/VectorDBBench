@@ -4,14 +4,23 @@ import logging
 import re
 import time
 import traceback
+from collections.abc import Callable
 from enum import Enum, auto
 
 import numpy as np
+from pydantic import PrivateAttr
 
 from .. import config
 from ..base import BaseModel
 from ..metric import Metric
-from ..models import PerformanceTimeoutError, TaskConfig, TaskStage
+from ..models import (
+    PerformanceTimeoutError,
+    ProgressStage,
+    ProgressStatus,
+    ProgressUpdate,
+    TaskConfig,
+    TaskStage,
+)
 from . import utils
 from .cases import Case, CaseLabel, StreamingPerformanceCase
 from .clients import DB, MetricType, api
@@ -62,6 +71,103 @@ class CaseRunner(BaseModel):
     final_search_runner: MultiProcessingSearchRunner | None = None
     read_write_runner: ReadWriteRunner | None = None
     cold_warm_search_runner: ColdWarmSearchRunner | None = None
+
+    _progress_callback: Callable[[ProgressUpdate], None] | None = PrivateAttr(default=None)
+    _progress_case_index: int = PrivateAttr(default=0)
+    _progress_case_total: int = PrivateAttr(default=1)
+    _progress_started_at: dict[ProgressStage, float] = PrivateAttr(default_factory=dict)
+    _active_progress_stage: ProgressStage | None = PrivateAttr(default=None)
+
+    def set_progress_callback(
+        self,
+        callback: Callable[[ProgressUpdate], None] | None,
+        case_index: int = 0,
+        case_total: int = 1,
+    ) -> None:
+        self._progress_callback = callback
+        self._progress_case_index = case_index
+        self._progress_case_total = case_total
+        self._progress_started_at = {}
+        self._active_progress_stage = None
+
+    def __getstate__(self) -> dict:
+        state = super().__getstate__()
+        private_state = dict(state.get("__pydantic_private__") or {})
+        private_state["_progress_callback"] = None
+        state["__pydantic_private__"] = private_state
+        return state
+
+    def _emit_progress(
+        self,
+        stage: ProgressStage,
+        status: ProgressStatus,
+        message: str,
+        current: float | None = None,
+        total: float | None = None,
+        unit: str | None = None,
+        duration_hint_seconds: float | None = None,
+    ) -> None:
+        if self._progress_callback is None:
+            return
+
+        updated_at = time.time()
+        if status == ProgressStatus.RUNNING:
+            started_at = self._progress_started_at.setdefault(stage, updated_at)
+            self._active_progress_stage = stage
+        else:
+            started_at = self._progress_started_at.get(stage, updated_at)
+            if self._active_progress_stage == stage:
+                self._active_progress_stage = None
+
+        update = ProgressUpdate(
+            run_id=self.run_id,
+            case_index=self._progress_case_index,
+            case_total=self._progress_case_total,
+            stage=stage,
+            stage_index=list(ProgressStage).index(stage),
+            stage_total=len(ProgressStage),
+            status=status,
+            message=message,
+            current=current,
+            total=total,
+            unit=unit,
+            started_at=started_at,
+            updated_at=updated_at,
+            duration_hint_seconds=duration_hint_seconds,
+        )
+        try:
+            self._progress_callback(update)
+        except Exception as e:
+            log.warning("Failed to report benchmark progress: %s", e)
+
+    def _report_download_progress(self, current_bytes: int, total_bytes: int, message: str) -> None:
+        self._emit_progress(
+            ProgressStage.DOWNLOAD,
+            ProgressStatus.RUNNING,
+            message,
+            current=current_bytes,
+            total=total_bytes,
+            unit="bytes",
+        )
+
+    def _report_concurrency_progress(
+        self,
+        current: int | None,
+        total: int | None,
+        concurrency: int,
+        message: str,
+    ) -> None:
+        if current is None:
+            self._progress_started_at[ProgressStage.SEARCH_CONCURRENT] = time.time()
+        self._emit_progress(
+            ProgressStage.SEARCH_CONCURRENT,
+            ProgressStatus.RUNNING,
+            message,
+            current=current,
+            total=total,
+            unit="level",
+            duration_hint_seconds=self.config.case_config.concurrency_search_config.concurrency_duration,
+        )
 
     def __eq__(self, obj: any):
         if isinstance(obj, CaseRunner):
@@ -138,7 +244,7 @@ class CaseRunner(BaseModel):
         base = re.sub(r"[^a-z0-9_]+", "_", base).strip("_")
         if len(base) > 63:
             h = hashlib.md5(base.encode(), usedforsecurity=False).hexdigest()[:6]
-            base = f"{base[:(63-7)]}_{h}"
+            base = f"{base[: (63 - 7)]}_{h}"
         return base
 
     def display(self) -> dict:
@@ -212,6 +318,7 @@ class CaseRunner(BaseModel):
 
     def _pre_run(self, drop_old: bool = True):
         try:
+            self._emit_progress(ProgressStage.SETUP, ProgressStatus.RUNNING, "Preparing benchmark target")
             self._validate_cloud_cold_latency_config(drop_old)
             creates_multitenant_collection = (
                 TaskStage.DROP_OLD in self.config.stages or TaskStage.LOAD in self.config.stages
@@ -226,8 +333,11 @@ class CaseRunner(BaseModel):
                 raise ValueError(msg)
 
             if self.is_fts:
+                self._emit_progress(ProgressStage.DOWNLOAD, ProgressStatus.RUNNING, "Preparing dataset")
                 self.ca.dataset.prepare(self.dataset_source, filters=self.ca.filters)
+                self._emit_progress(ProgressStage.DOWNLOAD, ProgressStatus.COMPLETED, "Dataset prepared")
                 self.init_db(drop_old)
+                self._emit_progress(ProgressStage.SETUP, ProgressStatus.COMPLETED, "Benchmark target ready")
                 return
 
             self.init_db(drop_old)
@@ -238,12 +348,16 @@ class CaseRunner(BaseModel):
                 self.db.set_multitenant_context(self.ca.tenant_labels())
                 if self.config.db in {DB.Milvus, DB.ZillizCloud} and not creates_multitenant_collection:
                     self.db.validate_multitenant_schema()
+            self._emit_progress(ProgressStage.SETUP, ProgressStatus.COMPLETED, "Benchmark target ready")
+            self._emit_progress(ProgressStage.DOWNLOAD, ProgressStatus.RUNNING, "Preparing dataset")
             self.ca.dataset.prepare(
                 self.dataset_source,
                 filters=self.ca.filters,
                 with_train_files=TaskStage.LOAD in self.config.stages,
                 with_scalar_labels=self.ca.with_scalar_labels,
+                progress_callback=self._report_download_progress,
             )
+            self._emit_progress(ProgressStage.DOWNLOAD, ProgressStatus.COMPLETED, "Dataset prepared")
         except ModuleNotFoundError as e:
             log.warning(f"pre run case error: please install client for db: {self.config.db}, error={e}")
             raise e from None
@@ -252,10 +366,7 @@ class CaseRunner(BaseModel):
         if getattr(self.ca, "label", None) != CaseLabel.CloudColdLatency:
             return
         if drop_old:
-            msg = (
-                "CloudColdLatencyCase requires an existing cold collection. "
-                "Run with --skip-drop-old and --skip-load."
-            )
+            msg = "CloudColdLatencyCase requires an existing cold collection. Run with --skip-drop-old and --skip-load."
             raise ValueError(msg)
         if TaskStage.LOAD in self.config.stages:
             msg = "CloudColdLatencyCase is search-only. Run with --skip-load."
@@ -263,22 +374,30 @@ class CaseRunner(BaseModel):
 
     def run(self, drop_old: bool = True) -> Metric:
         log.info("Starting run")
+        try:
+            self._pre_run(drop_old)
 
-        self._pre_run(drop_old)
-
-        if self.ca.label == CaseLabel.Load:
-            return self._run_capacity_case()
-        if self.ca.label in {CaseLabel.Performance, CaseLabel.FullTextSearchPerformance}:
-            return self._run_perf_case(drop_old)
-        if self.ca.label == CaseLabel.Streaming:
-            return self._run_streaming_case()
-        if self.ca.label == CaseLabel.CloudInsert:
-            return self._run_cloud_insert_case()
-        if self.ca.label == CaseLabel.CloudColdLatency:
-            return self._run_cloud_cold_latency_case(drop_old)
-        msg = f"unknown case type: {self.ca.label}"
-        log.warning(msg)
-        raise ValueError(msg)
+            if self.ca.label == CaseLabel.Load:
+                return self._run_capacity_case()
+            if self.ca.label in {CaseLabel.Performance, CaseLabel.FullTextSearchPerformance}:
+                return self._run_perf_case(drop_old)
+            if self.ca.label == CaseLabel.Streaming:
+                return self._run_streaming_case()
+            if self.ca.label == CaseLabel.CloudInsert:
+                return self._run_cloud_insert_case()
+            if self.ca.label == CaseLabel.CloudColdLatency:
+                return self._run_cloud_cold_latency_case(drop_old)
+            msg = f"unknown case type: {self.ca.label}"
+            log.warning(msg)
+            raise ValueError(msg)  # noqa: TRY301
+        except Exception as e:
+            failed_stage = self._active_progress_stage or ProgressStage.SETUP
+            self._emit_progress(
+                failed_stage,
+                ProgressStatus.FAILED,
+                f"{failed_stage.value.replace('_', ' ').title()} failed: {e}",
+            )
+            raise
 
     def _run_capacity_case(self) -> Metric:
         """run capacity cases
@@ -304,7 +423,7 @@ class CaseRunner(BaseModel):
             log.info(f"Capacity case loading dataset reaches VectorDB's limit: max capacity = {count}")
             return Metric(max_load_count=count)
 
-    def _run_perf_case(self, drop_old: bool = True) -> Metric:
+    def _run_perf_case(self, drop_old: bool = True) -> Metric:  # noqa: PLR0912, PLR0915
         """run performance cases
 
         Returns:
@@ -324,8 +443,23 @@ class CaseRunner(BaseModel):
                 }
             if drop_old:
                 if TaskStage.LOAD in self.config.stages:
+                    self._emit_progress(ProgressStage.INSERT, ProgressStatus.RUNNING, "Inserting dataset")
                     count, load_dur = self._load_data()
+                    self._emit_progress(
+                        ProgressStage.INSERT,
+                        ProgressStatus.COMPLETED,
+                        f"Inserted {count:,} records",
+                        current=count,
+                        total=count,
+                        unit="records",
+                    )
+                    self._emit_progress(ProgressStage.OPTIMIZE, ProgressStatus.RUNNING, "Optimizing database index")
                     build_dur = self._optimize()
+                    self._emit_progress(
+                        ProgressStage.OPTIMIZE,
+                        ProgressStatus.COMPLETED,
+                        "Database index optimized",
+                    )
                     m.inserted_count = count
                     m.insert_duration = round(load_dur, 4)
                     m.optimize_duration = round(build_dur, 4)
@@ -343,10 +477,32 @@ class CaseRunner(BaseModel):
                     )
                 else:
                     log.info("Data loading skipped")
+                    self._emit_progress(ProgressStage.INSERT, ProgressStatus.COMPLETED, "Dataset insertion skipped")
+                    self._emit_progress(ProgressStage.OPTIMIZE, ProgressStatus.COMPLETED, "Index optimization skipped")
+            else:
+                self._emit_progress(ProgressStage.INSERT, ProgressStatus.COMPLETED, "Existing dataset reused")
+                self._emit_progress(ProgressStage.OPTIMIZE, ProgressStatus.COMPLETED, "Existing index reused")
             if TaskStage.SEARCH_SERIAL in self.config.stages or TaskStage.SEARCH_CONCURRENT in self.config.stages:
                 self._init_search_runners()
                 if TaskStage.SEARCH_CONCURRENT in self.config.stages:
+                    concurrency_total = len(self.config.case_config.concurrency_search_config.num_concurrency)
+                    self._emit_progress(
+                        ProgressStage.SEARCH_CONCURRENT,
+                        ProgressStatus.RUNNING,
+                        "Starting concurrent search",
+                        current=0,
+                        total=concurrency_total,
+                        unit="level",
+                    )
                     search_results = self._conc_search()
+                    self._emit_progress(
+                        ProgressStage.SEARCH_CONCURRENT,
+                        ProgressStatus.COMPLETED,
+                        "Concurrent search completed",
+                        current=concurrency_total,
+                        total=concurrency_total,
+                        unit="level",
+                    )
                     (
                         m.qps,
                         m.conc_num_list,
@@ -355,12 +511,33 @@ class CaseRunner(BaseModel):
                         m.conc_latency_p95_list,
                         m.conc_latency_avg_list,
                     ) = search_results
+                else:
+                    self._emit_progress(
+                        ProgressStage.SEARCH_CONCURRENT,
+                        ProgressStatus.COMPLETED,
+                        "Concurrent search skipped",
+                    )
                 if TaskStage.SEARCH_SERIAL in self.config.stages:
+                    self._emit_progress(ProgressStage.SEARCH_SERIAL, ProgressStatus.RUNNING, "Running serial search")
                     search_results = self._serial_search()
+                    self._emit_progress(
+                        ProgressStage.SEARCH_SERIAL,
+                        ProgressStatus.COMPLETED,
+                        "Serial search completed",
+                    )
                     if self.is_fts:
                         m.recall, m.ndcg, m.mrr, m.serial_latency_p99, m.serial_latency_p95 = search_results
                     else:
                         m.recall, m.ndcg, m.serial_latency_p99, m.serial_latency_p95 = search_results
+                else:
+                    self._emit_progress(ProgressStage.SEARCH_SERIAL, ProgressStatus.COMPLETED, "Serial search skipped")
+            else:
+                self._emit_progress(
+                    ProgressStage.SEARCH_CONCURRENT,
+                    ProgressStatus.COMPLETED,
+                    "Concurrent search skipped",
+                )
+                self._emit_progress(ProgressStage.SEARCH_SERIAL, ProgressStatus.COMPLETED, "Serial search skipped")
             if hasattr(self.ca, "payload_profile"):
                 m.payload_profile = self.ca.payload_profile.value
                 m.payload_estimated_bytes_per_query = self.ca.estimated_payload_bytes_per_query(
@@ -620,6 +797,7 @@ class CaseRunner(BaseModel):
                 payload_profile=self.ca.payload_profile,
                 tenant_labels=tenant_labels,
                 workload_kind=WorkloadKind.VECTOR,
+                progress_callback=self._report_concurrency_progress,
             )
 
     def _init_fts_search_runner(self):
@@ -640,7 +818,9 @@ class CaseRunner(BaseModel):
             recall_queries = fts_dataset.recall_queries_data
             recall_ground_truth = fts_dataset.recall_gt_data
             if recall_queries is None or recall_ground_truth is None:
-                msg = "FTS dataset is missing recall queries or ground truth. Call prepare() before initializing search."
+                msg = (
+                    "FTS dataset is missing recall queries or ground truth. Call prepare() before initializing search."
+                )
                 raise ValueError(msg)
             if len(recall_queries) != len(recall_ground_truth):
                 msg = (
@@ -674,6 +854,7 @@ class CaseRunner(BaseModel):
                 k=self.config.case_config.k,
                 payload_profile=self.ca.payload_profile,
                 workload_kind=WorkloadKind.FULL_TEXT,
+                progress_callback=self._report_concurrency_progress,
             )
 
     def _init_read_write_runner(self):

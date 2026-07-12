@@ -5,7 +5,7 @@ import multiprocessing as mp
 import random
 import time
 import traceback
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from multiprocessing.queues import Queue
 
 import numpy as np
@@ -50,6 +50,7 @@ class MultiProcessingSearchRunner:
         payload_profile: PayloadProfile = PayloadProfile.IDS_ONLY,
         tenant_labels: list[str] | None = None,
         workload_kind: WorkloadKind = WorkloadKind.VECTOR,
+        progress_callback: Callable[[int | None, int | None, int, str], None] | None = None,
     ):
         self.db = db
         self.k = k
@@ -72,9 +73,10 @@ class MultiProcessingSearchRunner:
         ):
             msg = f"{self.db.name} does not support document payload_profile={self.payload_profile.value}"
             raise NotImplementedError(msg)
-        self.concurrencies = concurrencies
+        self.concurrencies = list(concurrencies)
         self.duration = duration
         self.concurrency_timeout = concurrency_timeout
+        self.progress_callback = progress_callback
 
         self.test_data = test_data
         log.debug(f"test dataset columns: {len(test_data)}")
@@ -82,6 +84,7 @@ class MultiProcessingSearchRunner:
     def __getstate__(self):
         state = self.__dict__.copy()
         state.pop("_search_func", None)
+        state.pop("progress_callback", None)
         return state
 
     def __setstate__(self, state: dict):
@@ -93,6 +96,21 @@ class MultiProcessingSearchRunner:
         else:
             msg = f"Unsupported search workload: {self.workload_kind}"
             raise NotImplementedError(msg)
+
+    def _report_concurrency_progress(
+        self,
+        current: int | None,
+        total: int | None,
+        concurrency: int,
+        message: str,
+    ) -> None:
+        callback = getattr(self, "progress_callback", None)
+        if callback is None:
+            return
+        try:
+            callback(current, total, concurrency, message)
+        except Exception as e:
+            log.warning("Failed to report concurrency progress: %s", e)
 
     def _search_embedding(self, emb: list[float], tenant: str | None = None) -> list[int]:
         if tenant is None:
@@ -154,7 +172,7 @@ class MultiProcessingSearchRunner:
                 if count % 500 == 0:
                     log.debug(
                         f"({mp.current_process().name:16}) "
-                        f"search_count: {count}, latest_latency={time.perf_counter()-s}"
+                        f"search_count: {count}, latest_latency={time.perf_counter() - s}"
                     )
 
         total_dur = round(time.perf_counter() - start_time, 4)
@@ -179,7 +197,14 @@ class MultiProcessingSearchRunner:
         conc_latency_p95_list = []
         conc_latency_avg_list = []
         try:
-            for conc in self.concurrencies:
+            concurrency_total = len(self.concurrencies)
+            for index, conc in enumerate(self.concurrencies):
+                self._report_concurrency_progress(
+                    None,
+                    None,
+                    conc,
+                    f"Running concurrency {conc} ({index + 1}/{concurrency_total})",
+                )
                 with mp.Manager() as m:
                     q, cond = m.Queue(), m.Condition()
                     with concurrent.futures.ProcessPoolExecutor(
@@ -210,6 +235,13 @@ class MultiProcessingSearchRunner:
                         conc_latency_p95_list.append(latency_p95)
                         conc_latency_avg_list.append(latency_avg)
                         log.info(f"End search in concurrency {conc}: dur={cost}s, total_count={all_count}, qps={qps}")
+
+                self._report_concurrency_progress(
+                    index + 1,
+                    concurrency_total,
+                    conc,
+                    f"Completed concurrency {conc} ({index + 1}/{concurrency_total})",
+                )
 
                 if qps > max_qps:
                     max_qps = qps
@@ -306,7 +338,14 @@ class MultiProcessingSearchRunner:
         conc_latency_p95_list = []
         conc_latency_avg_list = []
         try:
-            for conc in self.concurrencies:
+            concurrency_total = len(self.concurrencies)
+            for index, conc in enumerate(self.concurrencies):
+                self._report_concurrency_progress(
+                    None,
+                    None,
+                    conc,
+                    f"Running concurrency {conc} ({index + 1}/{concurrency_total})",
+                )
                 with mp.Manager() as m:
                     q, cond = m.Queue(), m.Condition()
                     with concurrent.futures.ProcessPoolExecutor(
@@ -348,6 +387,12 @@ class MultiProcessingSearchRunner:
                             f"all_success_count={all_success_count}, all_failed_count={all_failed_count}, qps={qps}, "
                             f"p99={latency_p99:.4f}s, p95={latency_p95:.4f}s, avg={latency_avg:.4f}s",
                         )
+                self._report_concurrency_progress(
+                    index + 1,
+                    concurrency_total,
+                    conc,
+                    f"Completed concurrency {conc} ({index + 1}/{concurrency_total})",
+                )
                 if qps > max_qps:
                     max_qps = qps
                     log.info(f"Update largest qps with concurrency {conc}: current max_qps={max_qps}")

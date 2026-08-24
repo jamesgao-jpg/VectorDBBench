@@ -71,6 +71,12 @@ class FakeDatasetWithLowPermutationQrels(FakeDataset):
         self.qrels = [Qrel("q1", "d3", 1), Qrel("q2", "d4", 2)]
 
 
+class FakeDatasetWithLateQrel(FakeDataset):
+    def __init__(self):
+        super().__init__()
+        self.qrels = [Qrel("q1", "d4", 1)]
+
+
 def make_tiny_msmarco_manager(size: int = 3) -> FtsDatasetManager:
     small_label = MSMarcoFts._size_label[100_000]
 
@@ -185,17 +191,21 @@ def test_fts_unfiltered_iterator_omits_filter_ids():
     assert [doc.filter_id for doc in docs] == [None, None, None]
 
 
-def test_fts_prepare_non_filter_skips_selected_document_build(monkeypatch: pytest.MonkeyPatch):
-    manager = make_tiny_msmarco_manager(size=4)
-    monkeypatch.setattr(manager._translator, "load", FakeDataset)
-    monkeypatch.setattr(
-        manager,
-        "_build_selected_doc_ids",
-        lambda: pytest.fail("unfiltered FTS must not build selected document IDs"),
-    )
+def test_fts_prepare_non_filter_materializes_qrel_preserving_corpus(monkeypatch: pytest.MonkeyPatch):
+    manager = make_tiny_msmarco_manager(size=3)
+    monkeypatch.setattr(manager._translator, "load", FakeDatasetWithLateQrel)
 
     assert manager.prepare(source=None, filters=non_filter)
+    monkeypatch.setattr(
+        manager._translator,
+        "iter_documents",
+        lambda dataset: pytest.fail("timed insertion must use the prepared corpus"),
+    )
+    docs = [doc for batch in manager for doc in batch]
+
     assert manager.selected_doc_ids is None
+    assert [doc.doc_id for doc in docs] == ["d1", "d2", "d4"]
+    assert [doc.filter_id for doc in docs] == [None, None, None]
     assert manager.recall_queries_data == manager.queries_data
     assert manager.recall_gt_data == manager.gt_data
 
@@ -241,6 +251,12 @@ def test_fts_prepare_integer_filter_derives_filtered_qrels(monkeypatch: pytest.M
 
     filters = NewIntFilter(filter_rate=0.5, int_field="filter_id", int_value=2)
     assert manager.prepare(source=None, filters=filters)
+    monkeypatch.setattr(
+        manager._translator,
+        "iter_documents",
+        lambda dataset: pytest.fail("timed insertion must use the prepared corpus"),
+    )
+    emitted_filter_ids = {doc.doc_id: doc.filter_id for batch in manager for doc in batch}
 
     assert [query.query_id for query in manager.queries_data] == ["q1", "q2"]
     assert manager.gt_data == [{"d3": 1}, {"d1": 2}]
@@ -249,6 +265,7 @@ def test_fts_prepare_integer_filter_derives_filtered_qrels(monkeypatch: pytest.M
     assert manager.recall_skipped is False
     assert manager.recall_skip_reason is None
     assert manager.qrel_filter_ids == {"d1": 3, "d3": 1}
+    assert emitted_filter_ids == {"d1": 3, "d2": 2, "d3": 1, "d4": 0}
     assert manager.filter_stats == {
         "filter_type": "NumGE",
         "filter_field": "filter_id",

@@ -4,9 +4,11 @@ Usage:
     >>> Dataset.Cohere.get(100_000)
 """
 
+import json
 import logging
 import math
 import pathlib
+import tempfile
 import types
 import typing
 from abc import ABC, abstractmethod
@@ -794,6 +796,8 @@ class FtsDatasetManager(BaseModel):
     qrel_filter_ids: dict[str, int] = PydanticField(default_factory=dict)
     filter_stats: dict[str, int | float | str] = PydanticField(default_factory=dict)
     _ir_dataset: typing.Any = PrivateAttr(default=None)
+    _prepared_documents_dir: typing.Any = PrivateAttr(default=None)
+    _prepared_documents_path: pathlib.Path | None = PrivateAttr(default=None)
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -864,6 +868,69 @@ class FtsDatasetManager(BaseModel):
 
         return selected_doc_ids
 
+    def _prepare_qrel_preserving_documents(self) -> None:
+        """Materialize capped documents before timed insertion."""
+        if self._prepared_documents_dir is not None:
+            self._prepared_documents_dir.cleanup()
+        self._prepared_documents_dir = None
+        self._prepared_documents_path = None
+
+        if self.data.size == max(self.data._size_label):
+            return
+
+        required_doc_ids = set(self.required_doc_ids)
+        self._validate_cap(required_doc_ids=required_doc_ids, target_size=self.data.size)
+        filler_limit = self.data.size - len(required_doc_ids)
+        filler_count = 0
+        selected_doc_ids: set[str] = set()
+        found_required_doc_ids: set[str] = set()
+        prepared_dir = tempfile.TemporaryDirectory(prefix="vdbbench_fts_qrel_v1_")
+        prepared_path = pathlib.Path(prepared_dir.name, f"{self.data.dir_name}.jsonl")
+
+        try:
+            with prepared_path.open("w", encoding="utf-8") as output:
+                for doc in self._translator.iter_documents(self._ir_dataset):
+                    doc_id = str(doc.doc_id)
+                    if doc_id in selected_doc_ids:
+                        continue
+                    if doc_id in required_doc_ids:
+                        found_required_doc_ids.add(doc_id)
+                    elif filler_count < filler_limit:
+                        filler_count += 1
+                    else:
+                        continue
+                    selected_doc_ids.add(doc_id)
+                    output.write(json.dumps([doc_id, doc.text], ensure_ascii=False) + "\n")
+                    if len(selected_doc_ids) == self.data.size and found_required_doc_ids == required_doc_ids:
+                        break
+
+            missing_doc_ids = required_doc_ids - found_required_doc_ids
+            if missing_doc_ids:
+                preview = ", ".join(sorted(missing_doc_ids)[:10])
+                msg = (
+                    f"{self.data.full_name} semantic qrel docs missing from corpus: {preview}"
+                    f"{'...' if len(missing_doc_ids) > 10 else ''}"
+                )
+                raise ValueError(msg)  # noqa: TRY301
+            if len(selected_doc_ids) != self.data.size:
+                msg = f"{self.data.full_name} prepared {len(selected_doc_ids)} documents, expected {self.data.size}"
+                raise ValueError(msg)  # noqa: TRY301
+        except Exception:
+            prepared_dir.cleanup()
+            raise
+
+        self._prepared_documents_dir = prepared_dir
+        self._prepared_documents_path = prepared_path
+
+    def _iter_prepared_documents(self) -> Iterator[FtsDocument]:
+        if self._prepared_documents_path is None:
+            yield from self._translator.iter_documents(self._ir_dataset)
+            return
+        with self._prepared_documents_path.open(encoding="utf-8") as prepared:
+            for line in prepared:
+                doc_id, text = json.loads(line)
+                yield FtsDocument(doc_id=doc_id, text=text)
+
     def _iter_selected_documents_with_filter_ids(self, include_filter_ids: bool = False) -> Iterator[FtsDocument]:
         """Yield selected documents with the exact filter IDs used for insertion and qrels."""
         if self._ir_dataset is None:
@@ -871,7 +938,7 @@ class FtsDatasetManager(BaseModel):
             raise RuntimeError(msg)
 
         permutation = FtsFilterIdPermutation.for_size(self.data.size) if include_filter_ids else None
-        documents = iter(self._translator.iter_documents(self._ir_dataset))
+        documents = iter(self._iter_prepared_documents())
         emitted_count = 0
         while emitted_count < self.data.size:
             try:
@@ -892,8 +959,8 @@ class FtsDatasetManager(BaseModel):
 
     def _build_qrel_filter_ids(self) -> dict[str, int]:
         """Map qrel doc IDs to their deterministic permuted FTS filter ID."""
-        if self.selected_doc_ids is None:
-            msg = "selected_doc_ids is required before building FTS filter IDs"
+        if self._ir_dataset is None:
+            msg = "ir_datasets dataset not loaded. Call prepare() first."
             raise RuntimeError(msg)
 
         qrel_doc_ids = set(self.required_doc_ids)
@@ -1051,8 +1118,8 @@ class FtsDatasetManager(BaseModel):
                     raise ValueError(msg)  # noqa: TRY301
 
                 self.required_doc_ids = {doc_id for qrels in self.gt_data for doc_id in qrels}
-                is_filtered = filters is not None and filters.type != FilterOp.NonFilter
-                self.selected_doc_ids = self._build_selected_doc_ids() if is_filtered else None
+                self.selected_doc_ids = None
+                self._prepare_qrel_preserving_documents()
                 self.recall_queries_data, self.recall_gt_data = self._apply_filters_to_qrels(
                     self.queries_data,
                     self.gt_data,
@@ -1121,7 +1188,6 @@ class FtsDocumentIterator:
         self._batch_size = batch_size
         self._finished = False
         self._docs_iter = None
-        self._doc_count = 0
 
     def __iter__(self):
         return self
@@ -1139,24 +1205,14 @@ class FtsDocumentIterator:
             raise StopIteration
 
         if self._docs_iter is None:
-            if self._ds.filter_stats:
-                self._docs_iter = self._ds._iter_selected_documents_with_filter_ids(include_filter_ids=True)
-            else:
-                self._docs_iter = self._ds._translator.iter_documents(self._ds._ir_dataset)
+            self._docs_iter = self._ds._iter_selected_documents_with_filter_ids(
+                include_filter_ids=bool(self._ds.filter_stats),
+            )
 
         batch = []
         while len(batch) < self._batch_size:
-            if self._doc_count >= self._ds.data.size:
-                self._finished = True
-                if batch:
-                    return batch
-                raise StopIteration
             try:
-                doc = next(self._docs_iter)
-                if not self._ds.filter_stats:
-                    doc.doc_id = str(doc.doc_id)
-                batch.append(doc)
-                self._doc_count += 1
+                batch.append(next(self._docs_iter))
             except StopIteration:
                 self._finished = True
                 if batch:

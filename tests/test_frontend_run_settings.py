@@ -9,7 +9,8 @@ from vectordb_bench.frontend.components.run_test.runSettings import (
     DEFAULT_STREAMING_INSERT_RATE,
     validate_streaming_insert_rates,
 )
-from vectordb_bench.models import CaseConfig
+from vectordb_bench.frontend.config.dbCaseConfigs import custom_streaming_config
+from vectordb_bench.models import CaseConfig, CaseConfigParamType
 
 
 def streaming_case(insert_rate: int | None = None) -> CaseConfig:
@@ -45,6 +46,16 @@ def test_validate_streaming_insert_rates_checks_each_streaming_case_and_uses_def
 
     is_valid, errors = validate_streaming_insert_rates(cases, DEFAULT_STREAMING_INSERT_RATE)
 
+    assert is_valid
+    assert errors == []
+
+
+def test_streaming_rate_control_accepts_valid_values_below_100():
+    rate_input = next(item for item in custom_streaming_config if item.label == CaseConfigParamType.insert_rate)
+
+    is_valid, errors = validate_streaming_insert_rates([streaming_case(50)], batch_size=10)
+
+    assert rate_input.inputConfig["min"] == 1
     assert is_valid
     assert errors == []
 

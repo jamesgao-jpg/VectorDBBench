@@ -242,7 +242,7 @@ custom_streaming_config: list[ConfigInput] = [
         label=CaseConfigParamType.insert_rate,
         displayLabel="Streaming Insert Rate",
         inputType=InputType.Number,
-        inputConfig=dict(step=100, min=100, max=MAX_STREAMLIT_INT, value=500),
+        inputConfig=dict(step=100, min=1, max=MAX_STREAMLIT_INT, value=500),
         inputHelp="Fixed streaming insertion rate (rows/s); must be at least and divisible by Insert Batch Size.",
     ),
     ConfigInput(

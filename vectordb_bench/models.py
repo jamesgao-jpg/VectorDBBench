@@ -6,7 +6,7 @@ from enum import Enum, StrEnum
 from typing import Any, ClassVar, Literal, Self
 
 import ujson
-from pydantic import PositiveInt, field_validator, model_validator
+from pydantic import ConfigDict, PositiveInt, field_validator, model_validator
 
 from vectordb_bench.backend.dataset import DatasetWithSizeMap
 
@@ -360,6 +360,8 @@ class ResultLabel(Enum):
 
 
 class DatasetMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     name: str
     distribution: Literal["id", "ood"] | None = None
     source: DatasetSource

@@ -1,3 +1,4 @@
+import glob
 import logging
 import os
 import pathlib
@@ -257,7 +258,33 @@ class HuggingFaceReader(DatasetReader):
         *,
         revision: str | None = None,
     ) -> dict[str, pathlib.Path]:
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import hf_hub_download, snapshot_download
+
+        if any(glob.has_magic(file) for file in files):
+            try:
+                snapshot_root = pathlib.Path(
+                    snapshot_download(
+                        repo_id=dataset,
+                        repo_type="dataset",
+                        revision=revision,
+                        cache_dir=local_ds_root,
+                        allow_patterns=files,
+                    )
+                )
+            except Exception as exc:
+                msg = f"Failed to download {dataset} at revision {revision or 'default'}"
+                raise RuntimeError(msg) from exc
+
+            resolved = {}
+            for selector in files:
+                matches = sorted(path for path in snapshot_root.glob(selector) if path.is_file())
+                if not matches:
+                    msg = f"No files in {dataset} match selector {selector!r} at revision {revision or 'default'}"
+                    raise RuntimeError(msg)
+                for path in matches:
+                    name = path.relative_to(snapshot_root).as_posix()
+                    resolved.setdefault(name, path)
+            return resolved
 
         local_ds_root.mkdir(parents=True, exist_ok=True)
         resolved = {}

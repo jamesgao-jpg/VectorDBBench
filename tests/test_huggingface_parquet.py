@@ -1,11 +1,9 @@
-import logging
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from vectordb_bench import config
-from vectordb_bench.backend.cases import Performance
 from vectordb_bench.backend.clients import MetricType
 from vectordb_bench.backend.data_source import DatasetSource, HuggingFaceReader
 from vectordb_bench.backend.dataset import (
@@ -15,7 +13,6 @@ from vectordb_bench.backend.dataset import (
     get_registered_datasets,
 )
 from vectordb_bench.backend.filter import LabelFilter, non_filter
-from vectordb_bench.frontend.config.dbCaseConfigs import UI_CASE_CLUSTERS
 from vectordb_bench.models import DatasetMetadata
 
 
@@ -105,7 +102,7 @@ def test_hugging_face_parquet_manager_resolves_roles_and_concatenates_queries(
             ground_truth_width=2,
             query_count=3,
             family="VDBBench",
-            dataset_metadata={"normalization": "l2", "license": "apache-2.0"},
+            dataset_metadata={"normalization": "l2"},
         )
     )
 
@@ -119,37 +116,33 @@ def test_hugging_face_parquet_manager_resolves_roles_and_concatenates_queries(
     metadata = DatasetMetadata.model_validate(manager.result_metadata).model_dump(mode="json")
     assert metadata["storage_format"] == "parquet"
     assert metadata["normalization"] == "l2"
-    assert metadata["license"] == "apache-2.0"
 
 
-def test_vdbbench_multimodal_datasets_are_registered_for_performance_and_ui(caplog: pytest.LogCaptureFixture):
+def test_vdbbench_multimodal_datasets_are_registered_for_performance_and_ui():
     expected = {
         "multimodal-embedding-1m": (
             "VDBBench/multimodal-embedding-1M",
             ("train.parquet",),
             ("test.parquet",),
             "neighbors.parquet",
-            False,
         ),
         "multimodal-embedding-10m": (
             "VDBBench/multimodal-embedding-10M",
             ("data/train-*.parquet",),
             ("data/test-*.parquet",),
             "data/neighbors.parquet",
-            True,
         ),
         "multimodal-embedding-100m": (
             "VDBBench/multimodal-embedding-100M",
             ("train/shard-*/*.parquet",),
             ("test/*.parquet",),
             "neighbors/neighbors.parquet",
-            False,
         ),
     }
     managers = get_registered_datasets(family="VDBBench")
     assert {manager.data.name for manager in managers} == set(expected)
 
-    for name, (repository, train, query, ground_truth, overlap) in expected.items():
+    for name, (repository, train, query, ground_truth) in expected.items():
         manager = get_dataset_manager(name)
         assert isinstance(manager, ParquetDatasetManager)
         assert manager.data.source == DatasetSource.HuggingFace
@@ -161,4 +154,3 @@ def test_vdbbench_multimodal_datasets_are_registered_for_performance_and_ui(capl
         assert manager.data.metric_type == MetricType.IP
         assert manager.data.ground_truth_width == 100
         assert manager.data.query_count == 10_000
-        assert manager.data.dataset_metadata["query_base_overlap"] is overlap

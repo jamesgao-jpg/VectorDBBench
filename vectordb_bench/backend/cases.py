@@ -975,11 +975,6 @@ class Performance(PerformanceCase):
             raise ValueError("Performance does not support filter parameters")
         dataset = get_dataset_manager(dataset_name)
         data = dataset.data
-        if (data.dataset_metadata or {}).get("query_base_overlap"):
-            log.warning(
-                "%s query vectors overlap with its corpus; interpret recall and throughput comparisons accordingly",
-                data.name,
-            )
         super().__init__(
             dataset_name=dataset_name,
             name=f"Search Performance - {data.name}",

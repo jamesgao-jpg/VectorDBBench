@@ -1177,8 +1177,6 @@ def _parquet_manager(
     train_selectors: tuple[str, ...],
     query_selectors: tuple[str, ...],
     gt_selector: str,
-    license_name: str,
-    query_base_overlap: bool,
 ) -> ParquetDatasetManager:
     return ParquetDatasetManager(
         data=ParquetDataset(
@@ -1202,8 +1200,6 @@ def _parquet_manager(
             dataset_metadata={
                 "normalization": "l2",
                 "model": "Qwen3-VL-Embedding-8B",
-                "query_base_overlap": query_base_overlap,
-                "license": license_name,
             },
         )
     )
@@ -1218,8 +1214,6 @@ _PARQUET_DATASETS = (
         ("train.parquet",),
         ("test.parquet",),
         "neighbors.parquet",
-        "apache-2.0",
-        False,
     ),
     _parquet_manager(
         "multimodal-embedding-10m",
@@ -1229,8 +1223,6 @@ _PARQUET_DATASETS = (
         ("data/train-*.parquet",),
         ("data/test-*.parquet",),
         "data/neighbors.parquet",
-        "apache-2.0",
-        True,
     ),
     _parquet_manager(
         "multimodal-embedding-100m",
@@ -1240,8 +1232,6 @@ _PARQUET_DATASETS = (
         ("train/shard-*/*.parquet",),
         ("test/*.parquet",),
         "neighbors/neighbors.parquet",
-        "cc-by-4.0",
-        False,
     ),
 )
 

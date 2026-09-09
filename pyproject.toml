@@ -45,9 +45,7 @@ dependencies = [
     "ujson",
     "ir_datasets",
     "h5py",
-    "filelock",
     "huggingface_hub",
-    "pyarrow",
 ]
 dynamic = ["version"]
 

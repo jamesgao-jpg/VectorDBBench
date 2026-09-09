@@ -1,4 +1,6 @@
 import json
+import pickle
+from inspect import isabstract
 from pathlib import Path
 
 import h5py
@@ -8,13 +10,20 @@ import pytest
 
 from vectordb_bench import config
 from vectordb_bench.backend.assembler import Assembler
-from vectordb_bench.backend.cases import VibePerformance
+from vectordb_bench.backend.cases import Performance
 from vectordb_bench.backend.clients import DB, EmptyDBCaseConfig, MetricType
 from vectordb_bench.backend.data_source import DatasetSource, HuggingFaceReader
-from vectordb_bench.backend.dataset import SizeLabel
+from vectordb_bench.backend.dataset import (
+    Dataset,
+    DatasetManager,
+    DatasetWithSizeType,
+    CustomDataset,
+    Hdf5Dataset,
+    Hdf5DatasetManager,
+    ParquetDatasetManager,
+    get_registered_datasets,
+)
 from vectordb_bench.backend.filter import LabelFilter, non_filter
-from vectordb_bench.backend.vibe_catalog import VIBE_DATASETS, VIBE_REVISION
-from vectordb_bench.backend.vibe_dataset import VibeDataset, VibeDatasetManager
 from vectordb_bench.cli.cli import get_custom_case_config
 from vectordb_bench.frontend.components.check_results.data import mergeTasks
 from vectordb_bench.frontend.config.dbCaseConfigs import UI_CASE_CLUSTERS
@@ -23,17 +32,21 @@ from vectordb_bench.models import CaseConfig, CaseResult, CaseType, TaskConfig, 
 from vectordb_bench.restful.format_res import format_results
 
 
-def test_vibe_catalog_is_the_advertised_24_dataset_set():
-    assert len(VIBE_DATASETS) == 24
-    assert len({spec.name for spec in VIBE_DATASETS}) == 24
-    assert sum(spec.lifecycle == "active" for spec in VIBE_DATASETS) == 19
-    assert sum(spec.lifecycle == "deprecated" for spec in VIBE_DATASETS) == 5
-    assert sum(spec.distribution == "id" for spec in VIBE_DATASETS) == 15
-    assert sum(spec.distribution == "ood" for spec in VIBE_DATASETS) == 9
-    assert all(spec.filename == f"{spec.name}.hdf5" for spec in VIBE_DATASETS)
-    ip_specs = [spec for spec in VIBE_DATASETS if spec.source_distance == "ip"]
-    assert len(ip_specs) == 4
-    assert all(spec.metric_type == MetricType.IP for spec in ip_specs)
+def test_vibe_is_registered_through_generic_dataset_managers():
+    vibe = get_registered_datasets(family="VIBE")
+    assert isabstract(DatasetManager)
+    assert isinstance(Dataset.COHERE.manager(100_000), ParquetDatasetManager)
+    assert len(vibe) == 24
+    assert len({manager.data.name for manager in vibe}) == 24
+    assert all(isinstance(manager, Hdf5DatasetManager) for manager in vibe)
+    assert sum(manager.data.lifecycle == "active" for manager in vibe) == 19
+    assert sum(manager.data.lifecycle == "deprecated" for manager in vibe) == 5
+    assert sum(manager.data.distribution == "id" for manager in vibe) == 15
+    assert sum(manager.data.distribution == "ood" for manager in vibe) == 9
+    assert all(manager.data.file_name == f"{manager.data.name}.hdf5" for manager in vibe)
+    ip_datasets = [manager.data for manager in vibe if manager.data.source_distance == "ip"]
+    assert len(ip_datasets) == 4
+    assert all(data.metric_type == MetricType.IP for data in ip_datasets)
     assert isinstance(DatasetSource.HuggingFace.reader(), HuggingFaceReader)
 
 
@@ -41,6 +54,8 @@ def test_hugging_face_reader_uses_pinned_single_file_download(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    manager = get_registered_datasets(family="VIBE")[0]
+    revision = manager.data.source_revision
     destination = tmp_path / "cached.hdf5"
     destination.write_bytes(b"hdf5")
     calls = []
@@ -54,7 +69,7 @@ def test_hugging_face_reader_uses_pinned_single_file_download(
         "vector-index-bench/vibe",
         ["glove-200-cosine.hdf5"],
         tmp_path / "cache",
-        revision=VIBE_REVISION,
+        revision=revision,
     )
 
     assert paths == {"glove-200-cosine.hdf5": destination}
@@ -63,39 +78,83 @@ def test_hugging_face_reader_uses_pinned_single_file_download(
             "repo_id": "vector-index-bench/vibe",
             "filename": "glove-200-cosine.hdf5",
             "repo_type": "dataset",
-            "revision": VIBE_REVISION,
+            "revision": revision,
             "cache_dir": tmp_path / "cache",
         }
     ]
+
+
+def test_hugging_face_source_can_feed_the_parquet_manager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    train_path = tmp_path / "cached-train.parquet"
+    test_path = tmp_path / "cached-test.parquet"
+    gt_path = tmp_path / "cached-neighbors.parquet"
+    pl.DataFrame({"id": [0], "emb": [[1.0, 2.0]]}).write_parquet(train_path)
+    pl.DataFrame({"id": [7], "emb": [[0.5, 0.25]]}).write_parquet(test_path)
+    pl.DataFrame({"id": [7], "neighbors_id": [[0]]}).write_parquet(gt_path)
+
+    data = CustomDataset(
+        name="hf-parquet",
+        size=1,
+        dim=2,
+        metric_type=MetricType.COSINE,
+        use_shuffled=False,
+        with_gt=True,
+        with_remote_resource=True,
+        dir="hf-parquet",
+        file_num=1,
+        source=DatasetSource.HuggingFace,
+        source_dataset="VDBBench/example",
+        source_revision="revision",
+    )
+    manager = ParquetDatasetManager(data=data)
+    resolved = {
+        "train.parquet": train_path,
+        "test.parquet": test_path,
+        "neighbors.parquet": gt_path,
+    }
+
+    class Reader:
+        def read(self, *args, **kwargs):
+            return resolved
+
+    monkeypatch.setattr(DatasetSource, "reader", lambda _source: Reader())
+    assert manager.prepare(k=1)
+    assert manager.test_data == [[0.5, 0.25]]
+    assert [row.tolist() for row in manager.gt_data.iter_rows()] == [[0]]
+    [batch] = list(manager.iter_batches(1))
+    assert batch["id"].tolist() == [0]
 
 
 def _tiny_manager(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     distance: str,
-) -> tuple[VibeDatasetManager, Path, np.ndarray]:
+) -> tuple[Hdf5DatasetManager, Path, np.ndarray]:
     metric = MetricType.L2 if distance == "euclidean" else MetricType.IP if distance == "ip" else MetricType.COSINE
-    spec = VIBE_DATASETS[0].model_copy(
-        update={
-            "name": f"tiny-{distance}",
-            "size": 5,
-            "dimension": 3,
-            "source_distance": distance,
-            "metric_type": metric,
-            "filename": f"tiny-{distance}.hdf5",
-        }
-    )
-    monkeypatch.setitem(VibeDataset._size_label, 5, SizeLabel(5, "VIBE", 1))
     monkeypatch.setattr(config, "DATASET_LOCAL_DIR", tmp_path / "datasets")
-    data = VibeDataset(
-        name=spec.name,
-        size=spec.size,
-        dim=spec.dimension,
-        metric_type=spec.metric_type,
+    data = Hdf5Dataset(
+        name=f"tiny-{distance}",
+        size=5,
+        dim=3,
+        metric_type=metric,
         use_shuffled=False,
+        with_gt=True,
+        file_name=f"tiny-{distance}.hdf5",
+        source=DatasetSource.HuggingFace,
+        source_dataset="example/datasets",
+        source_revision="test-revision",
+        source_distance=distance,
+        point_type="float",
+        family="test",
+        distribution="id",
+        lifecycle="active",
+        dataset_metadata={"distribution": "id", "lifecycle": "active"},
     )
-    manager = VibeDatasetManager(data=data, spec=spec)
-    source_path = tmp_path / spec.filename
+    manager = Hdf5DatasetManager(data=data)
+    source_path = tmp_path / data.file_name
     train = np.arange(15, dtype=np.float32).reshape(5, 3) / 7
     queries = np.array([[0.25, -0.5, 1.5], [3.25, 2.5, -1.0]], dtype=np.float32)
     neighbors = np.tile(np.arange(100, dtype=np.int64) % 5, (2, 1))
@@ -111,7 +170,7 @@ def _tiny_manager(
 
 
 @pytest.mark.parametrize("distance", ["euclidean", "normalized", "ip"])
-def test_vibe_conversion_preserves_vectors_metrics_and_provenance(
+def test_vibe_reads_hdf5_directly_with_one_open_per_load(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     distance: str,
@@ -129,25 +188,38 @@ def test_vibe_conversion_preserves_vectors_metrics_and_provenance(
             revision: str | None = None,
         ) -> dict[str, Path]:
             calls.append((dataset, files, local_ds_root, revision))
-            return {manager.spec.filename: source_path}
+            return {manager.data.file_name: source_path}
 
     monkeypatch.setattr(DatasetSource, "reader", lambda _source: Reader())
     assert manager.prepare(k=10)
 
-    assert calls[0][3] == VIBE_REVISION
+    assert calls == [("example/datasets", [manager.data.file_name], manager.data_dir, "test-revision")]
     assert manager.test_data == queries.tolist()
-    assert manager.gt_data.width == 100
-    assert manager.result_metadata["metric_type"] == manager.spec.metric_type.value
-    assert manager.result_metadata["revision"] == VIBE_REVISION
-    train = pl.read_parquet(manager.data_dir / manager.data.train_files[0])
-    assert train["id"].to_list() == list(range(5))
-    expected_train = np.arange(15, dtype=np.float32).reshape(5, 3) / np.float32(7)
-    assert np.array_equal(np.asarray(train["emb"].to_list(), dtype=np.float32), expected_train)
+    assert len(manager.gt_data) == len(queries)
+    assert all(len(row) == 100 for row in manager.gt_data)
+    assert manager.result_metadata["metric_type"] == manager.data.metric_type.value
+    assert manager.result_metadata["revision"] == "test-revision"
+    restored = pickle.loads(pickle.dumps(manager))
+    assert restored.source_path == source_path
 
-    monkeypatch.setattr(DatasetSource, "reader", lambda _source: pytest.fail("valid manifest must be reused"))
-    restored = VibeDatasetManager(data=manager.data, spec=manager.spec)
-    assert restored.prepare(k=10)
-    assert restored.result_metadata == manager.result_metadata
+    real_hdf5_file = h5py.File
+    load_opens = []
+
+    def counting_hdf5_file(*args, **kwargs):
+        load_opens.append(args[0])
+        return real_hdf5_file(*args, **kwargs)
+
+    monkeypatch.setattr(h5py, "File", counting_hdf5_file)
+    iterator = manager.iter_batches(batch_size=2)
+    batches = list(iterator)
+    assert load_opens == [source_path]
+    assert [len(batch) for batch in batches] == [2, 2, 1]
+    assert [item for batch in batches for item in batch["id"].tolist()] == list(range(5))
+    expected_train = np.arange(15, dtype=np.float32).reshape(5, 3) / np.float32(7)
+    actual_train = np.concatenate([np.stack(batch["emb"]) for batch in batches])
+    assert np.array_equal(actual_train, expected_train)
+    assert iterator._file is None
+    assert not list(tmp_path.rglob("*.parquet"))
 
 
 def test_vibe_rejects_invalid_ground_truth_and_noncanonical_queries(
@@ -157,27 +229,36 @@ def test_vibe_rejects_invalid_ground_truth_and_noncanonical_queries(
     manager, source_path, _ = _tiny_manager(tmp_path, monkeypatch, "ip")
     with h5py.File(source_path, "r+") as source:
         source["neighbors"][0, 0] = 5
+
+    class Reader:
+        def read(self, *args, **kwargs):
+            return {manager.data.file_name: source_path}
+
+    monkeypatch.setattr(DatasetSource, "reader", lambda _source: Reader())
     with pytest.raises(ValueError, match="outside"):
-        manager._convert(source_path)
+        manager.prepare(k=10)
 
     assert manager.max_search_k(non_filter) == 100
     with pytest.raises(ValueError, match="K from 1 to 100"):
         manager.resolve_search_files(k=101)
-    with pytest.raises(ValueError, match="do not contain scalar"):
+    with pytest.raises(ValueError, match="does not contain scalar"):
         manager.resolve_search_files(k=10, filters=LabelFilter(label_percentage=0.5))
 
 
 def test_vibe_case_cli_ui_and_preferred_source():
-    case = VibePerformance(vibe_dataset="glove-200-cosine")
+    case = Performance(dataset_name="glove-200-cosine")
     assert case.dataset.data.metric_type == MetricType.COSINE
     assert case.dataset.preferred_source == DatasetSource.HuggingFace
+    assert isinstance(
+        Performance(dataset_name=DatasetWithSizeType.CohereMedium.value).dataset,
+        ParquetDatasetManager,
+    )
     assert get_custom_case_config(
         {
-            "case_type": "VibePerformance",
-            "vibe_dataset": "glove-200-cosine",
-            "dataset_with_size_type": None,
+            "case_type": "Performance",
+            "dataset_name": "glove-200-cosine",
         }
-    ) == {"vibe_dataset": "glove-200-cosine"}
+    ) == {"dataset_name": "glove-200-cosine"}
 
     active = next(cluster for cluster in UI_CASE_CLUSTERS if cluster.label == "VIBE Search Performance")
     deprecated = next(cluster for cluster in UI_CASE_CLUSTERS if cluster.label.endswith("(Deprecated)"))
@@ -189,8 +270,8 @@ def test_vibe_case_cli_ui_and_preferred_source():
         db_config=DB.Test.config_cls(),
         db_case_config=EmptyDBCaseConfig(),
         case_config=CaseConfig(
-            case_id=CaseType.VibePerformance,
-            custom_case={"vibe_dataset": "glove-200-cosine"},
+            case_id=CaseType.Performance,
+            custom_case={"dataset_name": "glove-200-cosine"},
         ),
     )
     runner = Assembler.assemble("run-id", task, DatasetSource.AliyunOSS)
@@ -201,15 +282,15 @@ def test_vibe_case_cli_ui_and_preferred_source():
     legacy_task = task.model_copy(update={"case_config": CaseConfig(case_id=CaseType.Performance768D1M)})
     assert Assembler.assemble("run-id", legacy_task, DatasetSource.AliyunOSS).dataset_source == DatasetSource.AliyunOSS
 
-    with pytest.raises(ValueError, match="do not support filter"):
-        VibePerformance(vibe_dataset="glove-200-cosine", filter_rate=0.5)
+    with pytest.raises(ValueError, match="does not support filter"):
+        Performance(dataset_name="glove-200-cosine", filter_rate=0.5)
 
 
 def test_vibe_k_above_100_fails_during_case_config_validation():
     with pytest.raises(ValueError, match="K from 1 to 100"):
         CaseConfig(
-            case_id=CaseType.VibePerformance,
-            custom_case={"vibe_dataset": "glove-200-cosine"},
+            case_id=CaseType.Performance,
+            custom_case={"dataset_name": "glove-200-cosine"},
             k=101,
         )
 
@@ -220,8 +301,8 @@ def test_vibe_result_metadata_is_optional_and_round_trips(tmp_path: Path):
         db_config=DB.Test.config_cls(),
         db_case_config=EmptyDBCaseConfig(),
         case_config=CaseConfig(
-            case_id=CaseType.VibePerformance,
-            custom_case={"vibe_dataset": "glove-200-cosine"},
+            case_id=CaseType.Performance,
+            custom_case={"dataset_name": "glove-200-cosine"},
         ),
     )
     old_result = TestResult(
@@ -242,7 +323,7 @@ def test_vibe_result_metadata_is_optional_and_round_trips(tmp_path: Path):
         "source": "HuggingFace",
         "repository": "vector-index-bench/vibe",
         "filename": "glove-200-cosine.hdf5",
-        "revision": VIBE_REVISION,
+        "revision": "07b387891a221b7b073b83d2f752b76462e5fa03",
         "source_distance": "cosine",
         "metric_type": "COSINE",
         "point_type": "float",

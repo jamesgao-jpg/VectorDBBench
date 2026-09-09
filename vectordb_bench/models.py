@@ -229,9 +229,12 @@ class CaseConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_case_k(self) -> Self:
-        if self.case_id == CaseType.VibePerformance and self.k is not None and self.k > 100:
-            msg = f"VIBE supports K from 1 to 100, got {self.k}"
-            raise ValueError(msg)
+        if self.case_id == CaseType.Performance and self.k is not None:
+            case = self.case_id.case_cls(self.custom_case)
+            max_k = case.dataset.max_search_k(case.filters)
+            if max_k is not None and self.k > max_k:
+                msg = f"{case.dataset.data.name} supports K from 1 to {max_k}, got {self.k}"
+                raise ValueError(msg)
         return self
 
     @model_validator(mode="after")
@@ -358,15 +361,15 @@ class ResultLabel(Enum):
 
 class DatasetMetadata(BaseModel):
     name: str
-    distribution: Literal["id", "ood"]
-    lifecycle: Literal["active", "deprecated"]
+    distribution: Literal["id", "ood"] | None = None
+    lifecycle: Literal["active", "deprecated"] | None = None
     source: DatasetSource
-    repository: str
-    filename: str
-    revision: str
-    source_distance: str
-    metric_type: MetricType
-    point_type: str
+    repository: str | None = None
+    filename: str | None = None
+    revision: str | None = None
+    source_distance: str | None = None
+    metric_type: MetricType | None = None
+    point_type: str | None = None
 
 
 class CaseResult(BaseModel):

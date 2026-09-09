@@ -18,6 +18,8 @@ from enum import Enum
 from typing import Any, ClassVar, NamedTuple
 
 import ir_datasets
+import h5py
+import numpy as np
 import pandas as pd
 import polars as pl
 from pyarrow.parquet import ParquetFile
@@ -67,6 +69,10 @@ class BaseDataset(BaseModel):
     test_vector_field: str = "emb"
     gt_id_field: str = "id"
     gt_neighbors_field: str = "neighbors_id"
+    source: DatasetSource | None = None
+    source_dataset: str | None = None
+    source_revision: str | None = None
+    dataset_metadata: dict[str, Any] | None = None
 
     @field_validator("size")
     @classmethod
@@ -425,16 +431,8 @@ class OpenAI(BaseDataset):
     ]
 
 
-class DatasetManager(BaseModel):
-    """Download dataset if not in the local directory. Provide data for cases.
-
-    DatasetManager is iterable, each iteration will return the next batch of data in pandas.DataFrame
-
-    Examples:
-        >>> cohere = Dataset.COHERE.manager(100_000)
-        >>> for data in cohere:
-        >>>    print(data.columns)
-    """
+class DatasetManager(BaseModel, ABC):
+    """Common in-memory contract consumed by vector benchmark runners."""
 
     data: BaseDataset
     test_data: list[list[float]] | None = None
@@ -443,6 +441,8 @@ class DatasetManager(BaseModel):
     scalar_labels: pl.DataFrame | None = None
     train_files: list[str] = []
     reader: DatasetReader | None = None
+    resolved_files: dict[str, pathlib.Path] = {}
+    result_metadata: dict[str, Any] | None = None
 
     def __eq__(self, obj: any):
         if isinstance(obj, DatasetManager):
@@ -457,7 +457,7 @@ class DatasetManager(BaseModel):
 
     @property
     def preferred_source(self) -> DatasetSource | None:
-        return None
+        return self.data.source
 
     @property
     def data_dir(self) -> pathlib.Path:
@@ -475,10 +475,39 @@ class DatasetManager(BaseModel):
         )
 
     def __iter__(self):
-        return DataSetIterator(self)
+        return self.iter_batches(DEFAULT_INSERT_BATCH_SIZE)
+
+    @abstractmethod
+    def iter_batches(self, batch_size: int):
+        """Return insertion batches without materializing the whole corpus."""
+
+    @abstractmethod
+    def prepare(
+        self,
+        source: DatasetSource = DatasetSource.S3,
+        filters: Filter = non_filter,
+        with_train_files: bool = True,
+        with_scalar_labels: bool = False,
+        k: int | None = None,
+    ) -> bool:
+        """Resolve the source and load query and ground-truth data."""
+
+    def max_search_k(self, filters: Filter = non_filter) -> int | None:
+        return None
+
+    @abstractmethod
+    def resolve_search_files(self, *, k: int, filters: Filter = non_filter) -> SearchDatasetFiles:
+        """Validate search inputs and describe the query and ground-truth data."""
+
+    def _local_path(self, file_name: str) -> pathlib.Path:
+        return self.resolved_files.get(file_name, pathlib.Path(self.data_dir, file_name))
+
+
+class ParquetDatasetManager(DatasetManager):
+    """Prepare and stream datasets stored as Parquet files."""
 
     def iter_batches(self, batch_size: int):
-        return DataSetIterator(self, batch_size=batch_size)
+        return ParquetDatasetIterator(self, batch_size=batch_size)
 
     # TODO passing use_shuffle from outside
     def prepare(
@@ -515,10 +544,12 @@ class DatasetManager(BaseModel):
             if self.data.with_scalar_labels and self.data.scalar_labels_file_separated:
                 download_files.append(self.data.scalar_labels_file)
             download_files = [file for file in download_files if file is not None]
-            source.reader().read(
-                dataset=self.data.dir_name.lower(),
+            actual_source = self.preferred_source or source
+            self.resolved_files = actual_source.reader().read(
+                dataset=self.data.source_dataset or self.data.dir_name.lower(),
                 files=download_files,
                 local_ds_root=self.data_dir,
+                revision=self.data.source_revision,
             )
 
         needs_scalar_labels = filters.type == FilterOp.StrEqual or with_scalar_labels
@@ -538,7 +569,7 @@ class DatasetManager(BaseModel):
             query_ids = test_frame[self.data.test_id_field].to_list()
             self.test_data = test_frame[self.data.test_vector_field].to_list()
             self.gt_data = ParquetGroundTruth.from_file(
-                pathlib.Path(self.data_dir, gt_file),
+                self._local_path(gt_file),
                 id_field=self.data.gt_id_field,
                 neighbors_field=self.data.gt_neighbors_field,
                 expected_query_ids=query_ids,
@@ -608,7 +639,7 @@ class DatasetManager(BaseModel):
     def _read_file(self, file_name: str) -> pl.DataFrame:
         """read one file from disk into memory"""
         log.info(f"Read the entire file into memory: {file_name}")
-        p = pathlib.Path(self.data_dir, file_name)
+        p = self._local_path(file_name)
         if not p.exists():
             log.warning(f"No such file: {p}")
             return pl.DataFrame()
@@ -616,8 +647,8 @@ class DatasetManager(BaseModel):
         return pl.read_parquet(p)
 
 
-class DataSetIterator:
-    def __init__(self, dataset: DatasetManager, batch_size: int = DEFAULT_INSERT_BATCH_SIZE):
+class ParquetDatasetIterator:
+    def __init__(self, dataset: ParquetDatasetManager, batch_size: int = DEFAULT_INSERT_BATCH_SIZE):
         if batch_size <= 0:
             msg = f"insert batch size must be greater than 0, got {batch_size}"
             raise ValueError(msg)
@@ -642,7 +673,7 @@ class DataSetIterator:
         return self
 
     def _get_iter(self, file_name: str):
-        p = pathlib.Path(self._ds.data_dir, file_name)
+        p = self._ds._local_path(file_name)
         log.info(f"Get iterator for {p.name}")
         if not p.exists():
             msg = f"No such file: {p}"
@@ -670,6 +701,238 @@ class DataSetIterator:
         raise StopIteration
 
 
+# Backwards-compatible name for callers that imported the Parquet iterator directly.
+DataSetIterator = ParquetDatasetIterator
+
+
+class Hdf5Dataset(BaseDataset):
+    """Schema and source details for an HDF5 vector dataset."""
+
+    file_name: str
+    train_key: str = "train"
+    test_key: str = "test"
+    neighbors_key: str = "neighbors"
+    distances_key: str | None = "distances"
+    dimension_attr: str | None = "dimension"
+    distance_attr: str | None = "distance"
+    point_type_attr: str | None = "point_type"
+    source_distance: str | None = None
+    point_type: str | None = None
+    ground_truth_width: int = 100
+    family: str | None = None
+    distribution: str | None = None
+    lifecycle: str | None = None
+    modality: str | None = None
+    resource_tier: str = "standard"
+
+    @field_validator("size")
+    @classmethod
+    def verify_size(cls, value: int) -> int:
+        if value <= 0:
+            msg = f"Dataset size must be positive, got {value}"
+            raise ValueError(msg)
+        return value
+
+    @property
+    def label(self) -> str:
+        return self.family or "HDF5"
+
+    @property
+    def full_name(self) -> str:
+        return self.name
+
+    @property
+    def dir_name(self) -> str:
+        return self.name
+
+    @property
+    def train_files(self) -> list[str]:
+        return [self.file_name]
+
+
+class Hdf5DatasetIterator:
+    """Keep one HDF5 file open for the lifetime of an insertion iterator."""
+
+    def __init__(self, dataset: Hdf5Dataset, path: pathlib.Path, batch_size: int):
+        if batch_size <= 0:
+            msg = f"insert batch size must be greater than 0, got {batch_size}"
+            raise ValueError(msg)
+        self._dataset = dataset
+        self._batch_size = batch_size
+        self._offset = 0
+        self._file: h5py.File | None = None
+        self._train: h5py.Dataset | None = None
+        self._file = h5py.File(path, "r")
+        self._train = self._file[dataset.train_key]
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> pd.DataFrame:
+        if self._train is None or self._offset >= len(self._train):
+            self.close()
+            raise StopIteration
+
+        end = min(self._offset + self._batch_size, len(self._train))
+        vectors = np.ascontiguousarray(self._train[self._offset : end])
+        batch = pd.DataFrame(
+            {
+                self._dataset.train_id_field: np.arange(self._offset, end, dtype=np.int64),
+                self._dataset.train_vector_field: list(vectors),
+            }
+        )
+        self._offset = end
+        return batch
+
+    def close(self) -> None:
+        self._train = None
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+
+    def __del__(self):
+        self.close()
+
+
+class Hdf5DatasetManager(DatasetManager):
+    """Prepare query data and stream corpus vectors directly from HDF5."""
+
+    data: Hdf5Dataset
+    source_path: pathlib.Path | None = None
+
+    def iter_batches(self, batch_size: int):
+        if not self.train_files:
+            return iter(())
+        if self.source_path is None:
+            raise RuntimeError("HDF5 dataset is not prepared")
+        return Hdf5DatasetIterator(self.data, self.source_path, batch_size)
+
+    def max_search_k(self, filters: Filter = non_filter) -> int | None:
+        self._validate_unfiltered(filters)
+        return self.data.ground_truth_width
+
+    def resolve_search_files(self, *, k: int, filters: Filter = non_filter) -> SearchDatasetFiles:
+        self._validate_unfiltered(filters)
+        if not 1 <= k <= self.data.ground_truth_width:
+            msg = f"{self.data.name} supports K from 1 to {self.data.ground_truth_width}, got {k}"
+            raise ValueError(msg)
+        return SearchDatasetFiles(
+            self.data.file_name,
+            self.data.file_name,
+            width=self.data.ground_truth_width,
+        )
+
+    def prepare(
+        self,
+        source: DatasetSource = DatasetSource.S3,
+        filters: Filter = non_filter,
+        with_train_files: bool = True,
+        with_scalar_labels: bool = False,
+        k: int | None = None,
+    ) -> bool:
+        if with_scalar_labels:
+            raise ValueError(f"{self.data.name} does not provide scalar labels")
+        requested_k = config.K_DEFAULT if k is None else k
+        self.search_files = self.resolve_search_files(k=requested_k, filters=filters)
+        actual_source = self.preferred_source or source
+        if self.data.with_remote_resource:
+            self.resolved_files = actual_source.reader().read(
+                self.data.source_dataset or self.data.dir_name,
+                [self.data.file_name],
+                self.data_dir,
+                revision=self.data.source_revision,
+            )
+        self.source_path = self._local_path(self.data.file_name)
+
+        with h5py.File(self.source_path, "r") as hdf5:
+            self._validate_source(hdf5)
+            queries = np.ascontiguousarray(hdf5[self.data.test_key][:])
+            neighbors = np.ascontiguousarray(hdf5[self.data.neighbors_key][:])
+
+        if neighbors.size and (neighbors.min() < 0 or neighbors.max() >= self.data.size):
+            msg = f"Neighbor ID is outside [0, {self.data.size}) for {self.data.name}"
+            raise ValueError(msg)
+
+        self.test_data = queries.tolist()
+        self.gt_data = neighbors.tolist()
+        self.train_files = self.data.train_files if with_train_files else []
+        self.result_metadata = self._result_metadata(actual_source)
+        return True
+
+    @staticmethod
+    def _validate_unfiltered(filters: Filter) -> None:
+        if filters.type != FilterOp.NonFilter:
+            msg = "HDF5 dataset does not contain scalar fields or filtered ground truth"
+            raise ValueError(msg)
+
+    def _validate_source(self, source: h5py.File) -> None:
+        required_arrays = {self.data.train_key, self.data.test_key, self.data.neighbors_key}
+        if self.data.distances_key is not None:
+            required_arrays.add(self.data.distances_key)
+        missing_arrays = required_arrays - set(source)
+        if missing_arrays:
+            msg = f"Invalid HDF5 {self.data.file_name}: missing arrays={sorted(missing_arrays)}"
+            raise ValueError(msg)
+
+        self._validate_attr(source, self.data.dimension_attr, self.data.dim)
+        self._validate_attr(source, self.data.distance_attr, self.data.source_distance)
+        self._validate_attr(source, self.data.point_type_attr, self.data.point_type)
+
+        train = source[self.data.train_key]
+        test = source[self.data.test_key]
+        neighbors = source[self.data.neighbors_key]
+        if train.shape != (self.data.size, self.data.dim):
+            msg = f"Unexpected train shape for {self.data.name}: {train.shape}"
+            raise ValueError(msg)
+        if test.ndim != 2 or test.shape[1] != self.data.dim:
+            msg = f"Unexpected test shape for {self.data.name}: {test.shape}"
+            raise ValueError(msg)
+        expected_gt_shape = (test.shape[0], self.data.ground_truth_width)
+        if neighbors.shape != expected_gt_shape:
+            msg = f"Unexpected ground-truth shape for {self.data.name}: {neighbors.shape}"
+            raise ValueError(msg)
+        if self.data.distances_key is not None and source[self.data.distances_key].shape != expected_gt_shape:
+            msg = f"Unexpected distance shape for {self.data.name}: {source[self.data.distances_key].shape}"
+            raise ValueError(msg)
+        if train.dtype != test.dtype or not np.issubdtype(train.dtype, np.floating):
+            msg = f"Unsupported vector dtype for {self.data.name}: {train.dtype}/{test.dtype}"
+            raise ValueError(msg)
+        if not np.issubdtype(neighbors.dtype, np.integer):
+            msg = f"Neighbors must be integers, got {neighbors.dtype}"
+            raise ValueError(msg)
+
+    def _validate_attr(self, source: h5py.File, name: str | None, expected: object) -> None:
+        if name is None or expected is None:
+            return
+        if name not in source.attrs:
+            raise ValueError(f"Invalid HDF5 {self.data.file_name}: missing attribute {name}")
+        actual = source.attrs[name]
+        if isinstance(actual, bytes):
+            actual = actual.decode("utf-8")
+        if isinstance(expected, str):
+            actual = str(actual).lower()
+            expected = expected.lower()
+        if actual != expected:
+            msg = f"HDF5 attribute {name}={actual!r} does not match {expected!r} for {self.data.name}"
+            raise ValueError(msg)
+
+    def _result_metadata(self, source: DatasetSource) -> dict[str, Any]:
+        metadata = dict(self.data.dataset_metadata or {})
+        metadata.update(
+            {
+                "name": self.data.name,
+                "source": source.value,
+                "repository": self.data.source_dataset or "",
+                "filename": self.data.file_name,
+                "revision": self.data.source_revision or "",
+                "source_distance": self.data.source_distance or "",
+                "metric_type": self.data.metric_type.value,
+                "point_type": self.data.point_type or "",
+            }
+        )
+        return metadata
+
+
 class Dataset(Enum):
     """
     Value is Dataset classes, DO NOT use it
@@ -691,7 +954,7 @@ class Dataset(Enum):
         return self.value(size=size)
 
     def manager(self, size: int) -> DatasetManager:
-        return DatasetManager(data=self.get(size))
+        return ParquetDatasetManager(data=self.get(size))
 
 
 class DatasetWithSizeType(Enum):
@@ -746,6 +1009,108 @@ DatasetWithSizeMap = {
     DatasetWithSizeType.OpenAIMedium: Dataset.OPENAI.manager(500_000),
     DatasetWithSizeType.OpenAILarge: Dataset.OPENAI.manager(5_000_000),
 }
+
+
+def _hdf5_manager(
+    name: str,
+    distribution: str,
+    lifecycle: str,
+    modality: str,
+    size: int,
+    dimension: int,
+    source_distance: str,
+    resource_tier: str = "standard",
+) -> Hdf5DatasetManager:
+    metric_type = (
+        MetricType.L2
+        if source_distance == "euclidean"
+        else MetricType.IP if source_distance == "ip" else MetricType.COSINE
+    )
+    return Hdf5DatasetManager(
+        data=Hdf5Dataset(
+            name=name,
+            size=size,
+            dim=dimension,
+            metric_type=metric_type,
+            use_shuffled=False,
+            with_gt=True,
+            with_remote_resource=True,
+            file_name=f"{name}.hdf5",
+            source=DatasetSource.HuggingFace,
+            source_dataset="vector-index-bench/vibe",
+            source_revision="07b387891a221b7b073b83d2f752b76462e5fa03",
+            source_distance=source_distance,
+            point_type="float",
+            family="VIBE",
+            distribution=distribution,
+            lifecycle=lifecycle,
+            modality=modality,
+            resource_tier=resource_tier,
+            dataset_metadata={
+                "distribution": distribution,
+                "lifecycle": lifecycle,
+            },
+        )
+    )
+
+
+_HDF5_DATASETS = (
+    _hdf5_manager("agnews-mxbai-1024-euclidean", "id", "active", "Text", 769_382, 1024, "euclidean"),
+    _hdf5_manager("arxiv-nomic-768-normalized", "id", "active", "Text", 1_344_643, 768, "normalized"),
+    _hdf5_manager(
+        "dpr-jina-768-normalized", "id", "active", "Text", 20_969_760, 768, "normalized", "very_large"
+    ),
+    _hdf5_manager("glove-200-cosine", "id", "active", "Word", 1_192_514, 200, "cosine"),
+    _hdf5_manager("gooaq-distilroberta-768-normalized", "id", "active", "Text", 1_475_024, 768, "normalized"),
+    _hdf5_manager("imagenet-clip-512-normalized", "id", "active", "Image", 1_281_167, 512, "normalized"),
+    _hdf5_manager("inaturalist-resnet-2048-cosine", "id", "active", "Image", 499_000, 2048, "cosine"),
+    _hdf5_manager("landmark-dino-768-cosine", "id", "active", "Image", 760_757, 768, "cosine"),
+    _hdf5_manager("landmark-nomic-768-normalized", "id", "active", "Image", 760_757, 768, "normalized"),
+    _hdf5_manager(
+        "msmarco-qwen-1024-normalized", "id", "active", "Text", 8_840_823, 1024, "normalized", "very_large"
+    ),
+    _hdf5_manager("yahoo-minilm-384-normalized", "id", "active", "Text", 677_305, 384, "normalized"),
+    _hdf5_manager(
+        "hotpotqa-harrier-640-normalized", "ood", "active", "Text", 5_233_329, 640, "normalized", "large"
+    ),
+    _hdf5_manager("imagenet-align-640-normalized", "ood", "active", "Text-to-Image", 1_281_167, 640, "normalized"),
+    _hdf5_manager("laion-clip-512-normalized", "ood", "active", "Text-to-Image", 1_000_448, 512, "normalized"),
+    _hdf5_manager("yandex-200-cosine", "ood", "active", "Text-to-Image", 1_000_000, 200, "cosine"),
+    _hdf5_manager("cqadupstack-lemur-2048-ip", "ood", "active", "Multi-vector encoding", 457_149, 2048, "ip"),
+    _hdf5_manager(
+        "cqadupstack-muvera-5120-ip", "ood", "active", "Multi-vector encoding", 457_149, 5120, "ip", "large"
+    ),
+    _hdf5_manager("yi-128-ip", "ood", "active", "Attention", 187_843, 128, "ip"),
+    _hdf5_manager("llama-128-ip", "ood", "active", "Attention", 256_921, 128, "ip"),
+    _hdf5_manager("ccnews-nomic-768-normalized", "id", "deprecated", "Text", 495_328, 768, "normalized"),
+    _hdf5_manager("celeba-resnet-2048-cosine", "id", "deprecated", "Image", 201_599, 2048, "cosine"),
+    _hdf5_manager("coco-nomic-768-normalized", "ood", "deprecated", "Text-to-Image", 282_360, 768, "normalized"),
+    _hdf5_manager("codesearchnet-jina-768-cosine", "id", "deprecated", "Code", 1_374_067, 768, "cosine"),
+    _hdf5_manager("simplewiki-openai-3072-normalized", "id", "deprecated", "Text", 260_372, 3072, "normalized"),
+)
+
+REGISTERED_DATASETS: dict[str, DatasetManager] = {
+    **{dataset_type.value: manager for dataset_type, manager in DatasetWithSizeMap.items()},
+    **{manager.data.name: manager for manager in _HDF5_DATASETS},
+}
+
+
+def get_dataset_manager(name: str) -> DatasetManager:
+    try:
+        return REGISTERED_DATASETS[name].model_copy(deep=True)
+    except KeyError as exc:
+        supported = ", ".join(REGISTERED_DATASETS)
+        msg = f"Unknown dataset {name!r}; supported datasets: {supported}"
+        raise ValueError(msg) from exc
+
+
+def get_registered_datasets(*, family: str | None = None, lifecycle: str | None = None) -> list[DatasetManager]:
+    return [
+        manager.model_copy(deep=True)
+        for manager in REGISTERED_DATASETS.values()
+        if (family is None or getattr(manager.data, "family", None) == family)
+        and (lifecycle is None or getattr(manager.data, "lifecycle", None) == lifecycle)
+    ]
 
 
 # FTS Dataset Translator Pattern

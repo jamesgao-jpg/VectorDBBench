@@ -21,9 +21,8 @@ from .. import config
 from ..backend.cases import FTS_FILTER_RATES, PerformanceCase, type2case
 from ..backend.clients import DB
 from ..backend.clients.api import IndexType, MetricType
-from ..backend.dataset import DatasetWithSizeType, FtsDatasetWithSizeType
+from ..backend.dataset import REGISTERED_DATASETS, DatasetWithSizeType, FtsDatasetWithSizeType
 from ..backend.payload import PayloadProfile
-from ..backend.vibe_catalog import VIBE_DATASETS, get_vibe_dataset
 from ..interface import benchmark_runner
 from ..models import (
     CaseConfig,
@@ -44,7 +43,7 @@ DEFAULT_DATASET_WITH_SIZE_TYPE = DatasetWithSizeType.CohereMedium.value
 SUPPORTED_DATASET_WITH_SIZE_TYPES = "|".join(dataset.value for dataset in DatasetWithSizeType)
 SUPPORTED_FTS_DATASET_WITH_SIZE_TYPES = "|".join(dataset.value for dataset in FtsDatasetWithSizeType)
 SUPPORTED_FTS_FILTER_RATES = "|".join(f"{rate:g}" for rate in FTS_FILTER_RATES)
-SUPPORTED_VIBE_DATASETS = "|".join(dataset.name for dataset in VIBE_DATASETS)
+SUPPORTED_DATASET_NAMES = "|".join(REGISTERED_DATASETS)
 
 
 def copy_if_not_none(
@@ -206,8 +205,11 @@ are required """,
 
 
 def get_custom_case_config(parameters: dict) -> dict:
-    if parameters["case_type"] == "VibePerformance":
-        return get_vibe_custom_case_config(parameters)
+    if parameters["case_type"] == "Performance":
+        dataset_name = parameters["dataset_name"]
+        if dataset_name is None:
+            raise click.UsageError("--dataset-name is required for Performance")
+        return {"dataset_name": dataset_name}
     custom_case_config = {}
     dataset_with_size_type = parameters["dataset_with_size_type"] or DEFAULT_DATASET_WITH_SIZE_TYPE
     if parameters["case_type"] == "PerformanceCustomDataset":
@@ -295,21 +297,6 @@ def get_custom_case_config(parameters: dict) -> dict:
         }
         copy_if_not_none(custom_case_config, parameters, "fts_filter_rate", "filter_rate")
     return custom_case_config
-
-
-def get_vibe_custom_case_config(parameters: dict) -> dict:
-    vibe_dataset = parameters["vibe_dataset"]
-    if vibe_dataset is None:
-        raise click.UsageError("--vibe-dataset is required for VibePerformance")
-    spec = get_vibe_dataset(vibe_dataset)
-    if spec.lifecycle == "deprecated":
-        click.echo(f"Warning: VIBE dataset {spec.name} is deprecated.", err=True)
-    if spec.resource_tier != "standard":
-        click.echo(
-            f"Warning: VIBE dataset {spec.name} has resource tier {spec.resource_tier}.",
-            err=True,
-        )
-    return {"vibe_dataset": spec.name}
 
 
 def copy_fts_compatible_db_case_fields(source: DBCaseConfig, target: DBCaseConfig) -> DBCaseConfig:
@@ -672,15 +659,12 @@ class CommonTypedDict(TypedDict):
             default=None,
         ),
     ]
-    vibe_dataset: Annotated[
+    dataset_name: Annotated[
         str | None,
         click.option(
-            "--vibe-dataset",
-            type=click.Choice([dataset.name for dataset in VIBE_DATASETS]),
-            help=(
-                "Canonical VIBE dataset. Active datasets are listed before deprecated datasets: "
-                f"{SUPPORTED_VIBE_DATASETS}."
-            ),
+            "--dataset-name",
+            type=click.Choice(list(REGISTERED_DATASETS)),
+            help=f"Registered dataset used by the Performance case: {SUPPORTED_DATASET_NAMES}.",
             default=None,
         ),
     ]

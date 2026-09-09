@@ -16,8 +16,9 @@ from .dataset import (
     DatasetWithSizeType,
     FtsDatasetManager,
     FtsDatasetWithSizeType,
+    ParquetDatasetManager,
+    get_dataset_manager,
 )
-from .vibe_dataset import VibeDatasetManager
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ class CaseType(Enum):
 
     NewIntFilterPerformanceCase = 400
     CloudPayloadSearchCase = 500
-    VibePerformance = 501
+    Performance = 501
     FTSBm25Performance = 503
     CloudInsertCase = 600
     CloudColdLatencyCase = 700
@@ -447,7 +448,7 @@ class PerformanceCustomDataset(PerformanceCase):
             load_timeout=load_timeout,
             optimize_timeout=optimize_timeout,
             gt_file=f"{dataset_config.gt_name}.parquet",
-            dataset=DatasetManager(data=dataset),
+            dataset=ParquetDatasetManager(data=dataset),
             use_filter=use_filter,
             label_percentage=label_percentage,
         )
@@ -560,7 +561,7 @@ class StreamingCustomDataset(Case):
         super().__init__(
             name=name,
             description=description,
-            dataset=DatasetManager(data=dataset),
+            dataset=ParquetDatasetManager(data=dataset),
             insert_rate=insert_rate,
             search_stages=search_stages,
             concurrencies=concurrencies,
@@ -962,27 +963,30 @@ class FTSBm25Performance(FtsPerformanceCase):
         )
 
 
-class VibePerformance(PerformanceCase):
-    case_id: CaseType = CaseType.VibePerformance
-    vibe_dataset: str = "glove-200-cosine"
+class Performance(PerformanceCase):
+    """Run the standard performance workload against a registered dataset."""
 
-    def __init__(self, vibe_dataset: str = "glove-200-cosine", **kwargs):
+    case_id: CaseType = CaseType.Performance
+    dataset_name: str = DatasetWithSizeType.CohereMedium.value
+
+    def __init__(self, dataset_name: str = DatasetWithSizeType.CohereMedium.value, **kwargs):
         supplied_filters = [name for name in ("filter_rate", "label_percentage") if kwargs.get(name) is not None]
         if supplied_filters:
-            msg = "Canonical VIBE cases do not support filter parameters"
-            raise ValueError(msg)
-        dataset = VibeDatasetManager.from_name(vibe_dataset)
-        spec = dataset.spec
-        if spec.lifecycle == "deprecated":
-            log.warning("VIBE dataset %s is deprecated", spec.name)
-        if spec.resource_tier != "standard":
-            log.warning("VIBE dataset %s has resource tier %s", spec.name, spec.resource_tier)
+            raise ValueError("Performance does not support filter parameters")
+        dataset = get_dataset_manager(dataset_name)
+        data = dataset.data
+        lifecycle = getattr(data, "lifecycle", None)
+        resource_tier = getattr(data, "resource_tier", "standard")
+        if lifecycle == "deprecated":
+            log.warning("Dataset %s is deprecated", data.name)
+        if resource_tier != "standard":
+            log.warning("Dataset %s has resource tier %s", data.name, resource_tier)
         super().__init__(
-            vibe_dataset=spec.name,
-            name=f"VIBE Search Performance - {spec.name}",
+            dataset_name=dataset_name,
+            name=f"Search Performance - {data.name}",
             description=(
-                f"Canonical unfiltered VIBE {spec.distribution.upper()} search using "
-                f"{spec.metric_type.value}, {spec.dimension} dimensions, and {spec.size:,} corpus vectors."
+                f"Unfiltered search using {data.metric_type.value}, {data.dim} dimensions, "
+                f"and {data.size:,} corpus vectors."
             ),
             dataset=dataset,
             **kwargs,
@@ -1014,7 +1018,7 @@ type2case = {
     CaseType.NewIntFilterPerformanceCase: NewIntFilterPerformanceCase,
     CaseType.LabelFilterPerformanceCase: LabelFilterPerformanceCase,
     CaseType.CloudPayloadSearchCase: CloudPayloadSearchCase,
-    CaseType.VibePerformance: VibePerformance,
+    CaseType.Performance: Performance,
     CaseType.FTSBm25Performance: FTSBm25Performance,
     CaseType.CloudInsertCase: CloudInsertCase,
     CaseType.CloudColdLatencyCase: CloudColdLatencyCase,

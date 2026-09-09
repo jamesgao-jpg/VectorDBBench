@@ -26,14 +26,14 @@ VDBBench is sponsored by Zilliz，the leading opensource vectorDB company behind
 VectorDBBench supports the 24 active and deprecated datasets advertised by the
 [VIBE dataset repository](https://huggingface.co/datasets/vector-index-bench/vibe),
 including ID, OOD, L2, cosine, normalized, and inner-product workloads. The
-source HDF5 artifact is downloaded at a pinned revision and converted into the
-existing partitioned Parquet format on first use; later runs reuse a validated,
-revisioned conversion manifest.
+source HDF5 artifact is downloaded at a pinned revision. Query vectors and
+ground truth are loaded into memory, while corpus vectors are read directly
+from HDF5 in bounded insertion batches.
 
 ```shell
 vectordbbench milvushnsw \
-  --case-type VibePerformance \
-  --vibe-dataset glove-200-cosine \
+  --case-type Performance \
+  --dataset-name glove-200-cosine \
   --k 100
 ```
 
@@ -41,9 +41,7 @@ Canonical VIBE cases are unfiltered and support `1 <= k <= 100`, matching the
 published ground truth. Large datasets emit resource warnings but remain
 selectable. Hugging Face authentication and alternate endpoints use the
 standard `huggingface_hub` environment and cache configuration; tokens are not
-part of benchmark case configuration or result files. See the
-[feature design](docs/design/huggingface-vibe-datasets.md) for the catalog,
-metric mapping, cache layout, and reproducibility details.
+part of benchmark case configuration or result files.
 
 ## Quick Start
 ### Prerequirement

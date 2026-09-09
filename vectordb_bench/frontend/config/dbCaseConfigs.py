@@ -8,11 +8,12 @@ from vectordb_bench.backend.clients import DB
 from vectordb_bench.backend.clients.api import IndexType, MetricType, SQType
 from vectordb_bench.backend.dataset import (
     LAION_INT_FILTER_SEARCH_WIDTHS,
+    DatasetManager,
     DatasetWithSizeType,
     FtsDatasetWithSizeType,
+    get_registered_datasets,
 )
 from vectordb_bench.backend.payload import PayloadProfile
-from vectordb_bench.backend.vibe_catalog import VIBE_DATASETS, VibeDatasetSpec
 from vectordb_bench.frontend.components.custom.getCustomConfig import get_custom_configs
 from vectordb_bench.models import CaseConfig, CaseConfigParamType
 
@@ -218,25 +219,26 @@ def get_fts_case_items() -> list[UICaseItem]:
 
 
 def get_vibe_case_items(lifecycle: str) -> list[UICaseItem]:
-    def item(spec: VibeDatasetSpec) -> UICaseItem:
+    def item(manager: DatasetManager) -> UICaseItem:
+        data = manager.data
         resource_note = ""
-        if spec.resource_tier != "standard":
-            resource_note = f" Resource tier: {spec.resource_tier}; plan memory and disk accordingly."
+        if data.resource_tier != "standard":
+            resource_note = f" Resource tier: {data.resource_tier}; plan memory and disk accordingly."
         return UICaseItem(
-            label=f"{spec.name} ({spec.distribution.upper()}, {spec.metric_type.value}, {spec.dimension}D)",
+            label=f"{data.name} ({data.distribution.upper()}, {data.metric_type.value}, {data.dim}D)",
             description=(
-                f"{spec.lifecycle.capitalize()} VIBE {spec.modality} dataset with {spec.size:,} corpus vectors."
+                f"{data.lifecycle.capitalize()} VIBE {data.modality} dataset with {data.size:,} corpus vectors."
                 f"{resource_note}"
             ),
             cases=[
                 CaseConfig(
-                    case_id=CaseType.VibePerformance,
-                    custom_case={"vibe_dataset": spec.name},
+                    case_id=CaseType.Performance,
+                    custom_case={"dataset_name": data.name},
                 )
             ],
         )
 
-    return [item(spec) for spec in VIBE_DATASETS if spec.lifecycle == lifecycle]
+    return [item(manager) for manager in get_registered_datasets(family="VIBE", lifecycle=lifecycle)]
 
 
 def get_custom_case_cluter() -> UICaseItemCluster:

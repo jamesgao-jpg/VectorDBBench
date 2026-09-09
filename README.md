@@ -30,6 +30,24 @@ source HDF5 artifact is downloaded at a pinned revision. Query vectors and
 ground truth are loaded into memory, while corpus vectors are read directly
 from HDF5 in bounded insertion batches.
 
+#### Dataset licensing and attribution
+
+The VIBE authors distribute their newly created embedding datasets under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). VIBE also
+redistributes [GloVe](https://nlp.stanford.edu/projects/glove/) embeddings under
+[PDDL 1.0](https://opendatacommons.org/licenses/pddl/1-0/) and subsets of the
+[Yandex Text2Image](https://big-ann-benchmarks.com/neurips23.html) and
+[LAION](https://laion.ai/blog/laion-400-open-dataset/) datasets under CC BY
+4.0. See the
+[VIBE paper](https://arxiv.org/abs/2505.17810) and
+[dataset card](https://huggingface.co/datasets/vector-index-bench/vibe) for
+provenance and the upstream credit notices.
+
+VectorDBBench downloads the official artifacts directly and does not bundle or
+mirror them. If you redistribute or adapt the dataset artifacts, attribute the
+VIBE authors and upstream sources, link the applicable license, and indicate
+any changes.
+
 ```shell
 vectordbbench milvushnsw \
   --case-type Performance \

@@ -12,6 +12,7 @@ from vectordb_bench.backend.dataset import (
     FtsDatasetWithSizeType,
 )
 from vectordb_bench.backend.payload import PayloadProfile
+from vectordb_bench.backend.vibe_catalog import VIBE_DATASETS, VibeDatasetSpec
 from vectordb_bench.frontend.components.custom.getCustomConfig import get_custom_configs
 from vectordb_bench.models import CaseConfig, CaseConfigParamType
 
@@ -216,6 +217,28 @@ def get_fts_case_items() -> list[UICaseItem]:
     ]
 
 
+def get_vibe_case_items(lifecycle: str) -> list[UICaseItem]:
+    def item(spec: VibeDatasetSpec) -> UICaseItem:
+        resource_note = ""
+        if spec.resource_tier != "standard":
+            resource_note = f" Resource tier: {spec.resource_tier}; plan memory and disk accordingly."
+        return UICaseItem(
+            label=f"{spec.name} ({spec.distribution.upper()}, {spec.metric_type.value}, {spec.dimension}D)",
+            description=(
+                f"{spec.lifecycle.capitalize()} VIBE {spec.modality} dataset with {spec.size:,} corpus vectors."
+                f"{resource_note}"
+            ),
+            cases=[
+                CaseConfig(
+                    case_id=CaseType.VibePerformance,
+                    custom_case={"vibe_dataset": spec.name},
+                )
+            ],
+        )
+
+    return [item(spec) for spec in VIBE_DATASETS if spec.lifecycle == lifecycle]
+
+
 def get_custom_case_cluter() -> UICaseItemCluster:
     return UICaseItemCluster(label="Custom Search Performance Test", uiCaseItems=get_custom_case_items())
 
@@ -372,6 +395,14 @@ UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
             UICaseItem(cases=generate_normal_cases(CaseType.Performance1536D500K1P)),
             UICaseItem(cases=generate_normal_cases(CaseType.Performance1536D500K99P)),
         ],
+    ),
+    UICaseItemCluster(
+        label="VIBE Search Performance",
+        uiCaseItems=get_vibe_case_items("active"),
+    ),
+    UICaseItemCluster(
+        label="VIBE Search Performance (Deprecated)",
+        uiCaseItems=get_vibe_case_items("deprecated"),
     ),
     UICaseItemCluster(
         label="New-Int-Filter Search Performance Test",

@@ -33,3 +33,7 @@ PyMySQL
 packaging
 hdrhistogram>=0.10.1
 ir_datasets
+h5py
+filelock
+huggingface_hub
+pyarrow

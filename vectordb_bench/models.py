@@ -3,7 +3,7 @@ import pathlib
 from dataclasses import asdict
 from datetime import date, datetime
 from enum import Enum, StrEnum
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 
 import ujson
 from pydantic import PositiveInt, field_validator, model_validator
@@ -18,7 +18,8 @@ from .backend.clients import (
     DBConfig,
     EmptyDBCaseConfig,
 )
-from .backend.clients.api import IndexType
+from .backend.clients.api import IndexType, MetricType
+from .backend.data_source import DatasetSource
 from .backend.payload import PayloadProfile
 from .base import BaseModel
 from .metric import Metric
@@ -227,6 +228,13 @@ class CaseConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
+    def validate_case_k(self) -> Self:
+        if self.case_id == CaseType.VibePerformance and self.k is not None and self.k > 100:
+            msg = f"VIBE supports K from 1 to 100, got {self.k}"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
     def validate_payload_profile(self) -> Self:
         if self.payload_profile is None:
             return self
@@ -348,10 +356,24 @@ class ResultLabel(Enum):
     OUTOFRANGE = "?"
 
 
+class DatasetMetadata(BaseModel):
+    name: str
+    distribution: Literal["id", "ood"]
+    lifecycle: Literal["active", "deprecated"]
+    source: DatasetSource
+    repository: str
+    filename: str
+    revision: str
+    source_distance: str
+    metric_type: MetricType
+    point_type: str
+
+
 class CaseResult(BaseModel):
     metrics: Metric
     task_config: TaskConfig
     label: ResultLabel = ResultLabel.NORMAL
+    dataset_metadata: DatasetMetadata | None = None
 
 
 class TestResult(BaseModel):

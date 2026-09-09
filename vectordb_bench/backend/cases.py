@@ -17,6 +17,7 @@ from .dataset import (
     FtsDatasetManager,
     FtsDatasetWithSizeType,
 )
+from .vibe_dataset import VibeDatasetManager
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class CaseType(Enum):
 
     NewIntFilterPerformanceCase = 400
     CloudPayloadSearchCase = 500
+    VibePerformance = 501
     FTSBm25Performance = 503
     CloudInsertCase = 600
     CloudColdLatencyCase = 700
@@ -960,6 +962,33 @@ class FTSBm25Performance(FtsPerformanceCase):
         )
 
 
+class VibePerformance(PerformanceCase):
+    case_id: CaseType = CaseType.VibePerformance
+    vibe_dataset: str = "glove-200-cosine"
+
+    def __init__(self, vibe_dataset: str = "glove-200-cosine", **kwargs):
+        supplied_filters = [name for name in ("filter_rate", "label_percentage") if kwargs.get(name) is not None]
+        if supplied_filters:
+            msg = "Canonical VIBE cases do not support filter parameters"
+            raise ValueError(msg)
+        dataset = VibeDatasetManager.from_name(vibe_dataset)
+        spec = dataset.spec
+        if spec.lifecycle == "deprecated":
+            log.warning("VIBE dataset %s is deprecated", spec.name)
+        if spec.resource_tier != "standard":
+            log.warning("VIBE dataset %s has resource tier %s", spec.name, spec.resource_tier)
+        super().__init__(
+            vibe_dataset=spec.name,
+            name=f"VIBE Search Performance - {spec.name}",
+            description=(
+                f"Canonical unfiltered VIBE {spec.distribution.upper()} search using "
+                f"{spec.metric_type.value}, {spec.dimension} dimensions, and {spec.size:,} corpus vectors."
+            ),
+            dataset=dataset,
+            **kwargs,
+        )
+
+
 type2case = {
     CaseType.CapacityDim960: CapacityDim960,
     CaseType.CapacityDim128: CapacityDim128,
@@ -985,6 +1014,7 @@ type2case = {
     CaseType.NewIntFilterPerformanceCase: NewIntFilterPerformanceCase,
     CaseType.LabelFilterPerformanceCase: LabelFilterPerformanceCase,
     CaseType.CloudPayloadSearchCase: CloudPayloadSearchCase,
+    CaseType.VibePerformance: VibePerformance,
     CaseType.FTSBm25Performance: FTSBm25Performance,
     CaseType.CloudInsertCase: CloudInsertCase,
     CaseType.CloudColdLatencyCase: CloudColdLatencyCase,

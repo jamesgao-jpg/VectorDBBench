@@ -21,6 +21,30 @@ VDBBench is sponsored by Zilliz，the leading opensource vectorDB company behind
 
 **June 2026 update:** Full Text Search has landed in VectorDBBench. We now benchmark BM25-style retrieval across supported backends, starting with MS MARCO and HotpotQA datasets, payload profiles, recall, QPS, and load metrics ready to compare. See the [VectorDBBench Full Text Search Release Note](docs/release/2026-06-full-text-search.md) for the full rollout details and caveats.
 
+### VIBE datasets from Hugging Face
+
+VectorDBBench supports the 24 active and deprecated datasets advertised by the
+[VIBE dataset repository](https://huggingface.co/datasets/vector-index-bench/vibe),
+including ID, OOD, L2, cosine, normalized, and inner-product workloads. The
+source HDF5 artifact is downloaded at a pinned revision and converted into the
+existing partitioned Parquet format on first use; later runs reuse a validated,
+revisioned conversion manifest.
+
+```shell
+vectordbbench milvushnsw \
+  --case-type VibePerformance \
+  --vibe-dataset glove-200-cosine \
+  --k 100
+```
+
+Canonical VIBE cases are unfiltered and support `1 <= k <= 100`, matching the
+published ground truth. Large datasets emit resource warnings but remain
+selectable. Hugging Face authentication and alternate endpoints use the
+standard `huggingface_hub` environment and cache configuration; tokens are not
+part of benchmark case configuration or result files. See the
+[feature design](docs/design/huggingface-vibe-datasets.md) for the catalog,
+metric mapping, cache layout, and reproducibility details.
+
 ## Quick Start
 ### Prerequirement
 ``` shell

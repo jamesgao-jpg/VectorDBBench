@@ -456,6 +456,10 @@ class DatasetManager(BaseModel):
         self.reader = reader
 
     @property
+    def preferred_source(self) -> DatasetSource | None:
+        return None
+
+    @property
     def data_dir(self) -> pathlib.Path:
         """data local directory: config.DATASET_LOCAL_DIR/{dataset_name}/{dataset_dirname}
 
@@ -1011,6 +1015,10 @@ class FtsDatasetManager(BaseModel):
 
     def __hash__(self) -> int:
         return hash((self.data.name, self.data.size))
+
+    @property
+    def preferred_source(self) -> DatasetSource:
+        return DatasetSource.IR_DATASETS
 
     @property
     def data_dir(self) -> pathlib.Path:

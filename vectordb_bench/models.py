@@ -362,7 +362,6 @@ class ResultLabel(Enum):
 class DatasetMetadata(BaseModel):
     name: str
     distribution: Literal["id", "ood"] | None = None
-    lifecycle: Literal["active", "deprecated"] | None = None
     source: DatasetSource
     repository: str | None = None
     filename: str | None = None

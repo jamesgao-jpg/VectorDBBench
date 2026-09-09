@@ -721,9 +721,7 @@ class Hdf5Dataset(BaseDataset):
     ground_truth_width: int = 100
     family: str | None = None
     distribution: str | None = None
-    lifecycle: str | None = None
     modality: str | None = None
-    resource_tier: str = "standard"
 
     @field_validator("size")
     @classmethod
@@ -1014,12 +1012,10 @@ DatasetWithSizeMap = {
 def _hdf5_manager(
     name: str,
     distribution: str,
-    lifecycle: str,
     modality: str,
     size: int,
     dimension: int,
     source_distance: str,
-    resource_tier: str = "standard",
 ) -> Hdf5DatasetManager:
     metric_type = (
         MetricType.L2
@@ -1043,50 +1039,37 @@ def _hdf5_manager(
             point_type="float",
             family="VIBE",
             distribution=distribution,
-            lifecycle=lifecycle,
             modality=modality,
-            resource_tier=resource_tier,
-            dataset_metadata={
-                "distribution": distribution,
-                "lifecycle": lifecycle,
-            },
+            dataset_metadata={"distribution": distribution},
         )
     )
 
 
 _HDF5_DATASETS = (
-    _hdf5_manager("agnews-mxbai-1024-euclidean", "id", "active", "Text", 769_382, 1024, "euclidean"),
-    _hdf5_manager("arxiv-nomic-768-normalized", "id", "active", "Text", 1_344_643, 768, "normalized"),
-    _hdf5_manager(
-        "dpr-jina-768-normalized", "id", "active", "Text", 20_969_760, 768, "normalized", "very_large"
-    ),
-    _hdf5_manager("glove-200-cosine", "id", "active", "Word", 1_192_514, 200, "cosine"),
-    _hdf5_manager("gooaq-distilroberta-768-normalized", "id", "active", "Text", 1_475_024, 768, "normalized"),
-    _hdf5_manager("imagenet-clip-512-normalized", "id", "active", "Image", 1_281_167, 512, "normalized"),
-    _hdf5_manager("inaturalist-resnet-2048-cosine", "id", "active", "Image", 499_000, 2048, "cosine"),
-    _hdf5_manager("landmark-dino-768-cosine", "id", "active", "Image", 760_757, 768, "cosine"),
-    _hdf5_manager("landmark-nomic-768-normalized", "id", "active", "Image", 760_757, 768, "normalized"),
-    _hdf5_manager(
-        "msmarco-qwen-1024-normalized", "id", "active", "Text", 8_840_823, 1024, "normalized", "very_large"
-    ),
-    _hdf5_manager("yahoo-minilm-384-normalized", "id", "active", "Text", 677_305, 384, "normalized"),
-    _hdf5_manager(
-        "hotpotqa-harrier-640-normalized", "ood", "active", "Text", 5_233_329, 640, "normalized", "large"
-    ),
-    _hdf5_manager("imagenet-align-640-normalized", "ood", "active", "Text-to-Image", 1_281_167, 640, "normalized"),
-    _hdf5_manager("laion-clip-512-normalized", "ood", "active", "Text-to-Image", 1_000_448, 512, "normalized"),
-    _hdf5_manager("yandex-200-cosine", "ood", "active", "Text-to-Image", 1_000_000, 200, "cosine"),
-    _hdf5_manager("cqadupstack-lemur-2048-ip", "ood", "active", "Multi-vector encoding", 457_149, 2048, "ip"),
-    _hdf5_manager(
-        "cqadupstack-muvera-5120-ip", "ood", "active", "Multi-vector encoding", 457_149, 5120, "ip", "large"
-    ),
-    _hdf5_manager("yi-128-ip", "ood", "active", "Attention", 187_843, 128, "ip"),
-    _hdf5_manager("llama-128-ip", "ood", "active", "Attention", 256_921, 128, "ip"),
-    _hdf5_manager("ccnews-nomic-768-normalized", "id", "deprecated", "Text", 495_328, 768, "normalized"),
-    _hdf5_manager("celeba-resnet-2048-cosine", "id", "deprecated", "Image", 201_599, 2048, "cosine"),
-    _hdf5_manager("coco-nomic-768-normalized", "ood", "deprecated", "Text-to-Image", 282_360, 768, "normalized"),
-    _hdf5_manager("codesearchnet-jina-768-cosine", "id", "deprecated", "Code", 1_374_067, 768, "cosine"),
-    _hdf5_manager("simplewiki-openai-3072-normalized", "id", "deprecated", "Text", 260_372, 3072, "normalized"),
+    _hdf5_manager("agnews-mxbai-1024-euclidean", "id", "Text", 769_382, 1024, "euclidean"),
+    _hdf5_manager("arxiv-nomic-768-normalized", "id", "Text", 1_344_643, 768, "normalized"),
+    _hdf5_manager("dpr-jina-768-normalized", "id", "Text", 20_969_760, 768, "normalized"),
+    _hdf5_manager("glove-200-cosine", "id", "Word", 1_192_514, 200, "cosine"),
+    _hdf5_manager("gooaq-distilroberta-768-normalized", "id", "Text", 1_475_024, 768, "normalized"),
+    _hdf5_manager("imagenet-clip-512-normalized", "id", "Image", 1_281_167, 512, "normalized"),
+    _hdf5_manager("inaturalist-resnet-2048-cosine", "id", "Image", 499_000, 2048, "cosine"),
+    _hdf5_manager("landmark-dino-768-cosine", "id", "Image", 760_757, 768, "cosine"),
+    _hdf5_manager("landmark-nomic-768-normalized", "id", "Image", 760_757, 768, "normalized"),
+    _hdf5_manager("msmarco-qwen-1024-normalized", "id", "Text", 8_840_823, 1024, "normalized"),
+    _hdf5_manager("yahoo-minilm-384-normalized", "id", "Text", 677_305, 384, "normalized"),
+    _hdf5_manager("hotpotqa-harrier-640-normalized", "ood", "Text", 5_233_329, 640, "normalized"),
+    _hdf5_manager("imagenet-align-640-normalized", "ood", "Text-to-Image", 1_281_167, 640, "normalized"),
+    _hdf5_manager("laion-clip-512-normalized", "ood", "Text-to-Image", 1_000_448, 512, "normalized"),
+    _hdf5_manager("yandex-200-cosine", "ood", "Text-to-Image", 1_000_000, 200, "cosine"),
+    _hdf5_manager("cqadupstack-lemur-2048-ip", "ood", "Multi-vector encoding", 457_149, 2048, "ip"),
+    _hdf5_manager("cqadupstack-muvera-5120-ip", "ood", "Multi-vector encoding", 457_149, 5120, "ip"),
+    _hdf5_manager("yi-128-ip", "ood", "Attention", 187_843, 128, "ip"),
+    _hdf5_manager("llama-128-ip", "ood", "Attention", 256_921, 128, "ip"),
+    _hdf5_manager("ccnews-nomic-768-normalized", "id", "Text", 495_328, 768, "normalized"),
+    _hdf5_manager("celeba-resnet-2048-cosine", "id", "Image", 201_599, 2048, "cosine"),
+    _hdf5_manager("coco-nomic-768-normalized", "ood", "Text-to-Image", 282_360, 768, "normalized"),
+    _hdf5_manager("codesearchnet-jina-768-cosine", "id", "Code", 1_374_067, 768, "cosine"),
+    _hdf5_manager("simplewiki-openai-3072-normalized", "id", "Text", 260_372, 3072, "normalized"),
 )
 
 REGISTERED_DATASETS: dict[str, DatasetManager] = {
@@ -1104,12 +1087,11 @@ def get_dataset_manager(name: str) -> DatasetManager:
         raise ValueError(msg) from exc
 
 
-def get_registered_datasets(*, family: str | None = None, lifecycle: str | None = None) -> list[DatasetManager]:
+def get_registered_datasets(*, family: str | None = None) -> list[DatasetManager]:
     return [
         manager.model_copy(deep=True)
         for manager in REGISTERED_DATASETS.values()
         if (family is None or getattr(manager.data, "family", None) == family)
-        and (lifecycle is None or getattr(manager.data, "lifecycle", None) == lifecycle)
     ]
 
 

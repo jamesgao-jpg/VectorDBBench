@@ -39,8 +39,6 @@ def test_vibe_is_registered_through_generic_dataset_managers():
     assert len(vibe) == 24
     assert len({manager.data.name for manager in vibe}) == 24
     assert all(isinstance(manager, Hdf5DatasetManager) for manager in vibe)
-    assert sum(manager.data.lifecycle == "active" for manager in vibe) == 19
-    assert sum(manager.data.lifecycle == "deprecated" for manager in vibe) == 5
     assert sum(manager.data.distribution == "id" for manager in vibe) == 15
     assert sum(manager.data.distribution == "ood" for manager in vibe) == 9
     assert all(manager.data.file_name == f"{manager.data.name}.hdf5" for manager in vibe)
@@ -150,8 +148,7 @@ def _tiny_manager(
         point_type="float",
         family="test",
         distribution="id",
-        lifecycle="active",
-        dataset_metadata={"distribution": "id", "lifecycle": "active"},
+        dataset_metadata={"distribution": "id"},
     )
     manager = Hdf5DatasetManager(data=data)
     source_path = tmp_path / data.file_name
@@ -260,10 +257,8 @@ def test_vibe_case_cli_ui_and_preferred_source():
         }
     ) == {"dataset_name": "glove-200-cosine"}
 
-    active = next(cluster for cluster in UI_CASE_CLUSTERS if cluster.label == "VIBE Search Performance")
-    deprecated = next(cluster for cluster in UI_CASE_CLUSTERS if cluster.label.endswith("(Deprecated)"))
-    assert len(active.uiCaseItems) == 19
-    assert len(deprecated.uiCaseItems) == 5
+    vibe = next(cluster for cluster in UI_CASE_CLUSTERS if cluster.label == "VIBE Search Performance")
+    assert len(vibe.uiCaseItems) == 24
 
     task = TaskConfig(
         db=DB.Test,
@@ -319,7 +314,6 @@ def test_vibe_result_metadata_is_optional_and_round_trips(tmp_path: Path):
     metadata = {
         "name": "glove-200-cosine",
         "distribution": "id",
-        "lifecycle": "active",
         "source": "HuggingFace",
         "repository": "vector-index-bench/vibe",
         "filename": "glove-200-cosine.hdf5",

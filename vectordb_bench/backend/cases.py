@@ -975,12 +975,6 @@ class Performance(PerformanceCase):
             raise ValueError("Performance does not support filter parameters")
         dataset = get_dataset_manager(dataset_name)
         data = dataset.data
-        lifecycle = getattr(data, "lifecycle", None)
-        resource_tier = getattr(data, "resource_tier", "standard")
-        if lifecycle == "deprecated":
-            log.warning("Dataset %s is deprecated", data.name)
-        if resource_tier != "standard":
-            log.warning("Dataset %s has resource tier %s", data.name, resource_tier)
         super().__init__(
             dataset_name=dataset_name,
             name=f"Search Performance - {data.name}",

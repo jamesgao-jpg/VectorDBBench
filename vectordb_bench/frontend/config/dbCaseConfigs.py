@@ -218,18 +218,12 @@ def get_fts_case_items() -> list[UICaseItem]:
     ]
 
 
-def get_vibe_case_items(lifecycle: str) -> list[UICaseItem]:
+def get_vibe_case_items() -> list[UICaseItem]:
     def item(manager: DatasetManager) -> UICaseItem:
         data = manager.data
-        resource_note = ""
-        if data.resource_tier != "standard":
-            resource_note = f" Resource tier: {data.resource_tier}; plan memory and disk accordingly."
         return UICaseItem(
             label=f"{data.name} ({data.distribution.upper()}, {data.metric_type.value}, {data.dim}D)",
-            description=(
-                f"{data.lifecycle.capitalize()} VIBE {data.modality} dataset with {data.size:,} corpus vectors."
-                f"{resource_note}"
-            ),
+            description=f"VIBE {data.modality} dataset with {data.size:,} corpus vectors.",
             cases=[
                 CaseConfig(
                     case_id=CaseType.Performance,
@@ -238,7 +232,7 @@ def get_vibe_case_items(lifecycle: str) -> list[UICaseItem]:
             ],
         )
 
-    return [item(manager) for manager in get_registered_datasets(family="VIBE", lifecycle=lifecycle)]
+    return [item(manager) for manager in get_registered_datasets(family="VIBE")]
 
 
 def get_custom_case_cluter() -> UICaseItemCluster:
@@ -400,11 +394,7 @@ UI_CASE_CLUSTERS: list[UICaseItemCluster] = [
     ),
     UICaseItemCluster(
         label="VIBE Search Performance",
-        uiCaseItems=get_vibe_case_items("active"),
-    ),
-    UICaseItemCluster(
-        label="VIBE Search Performance (Deprecated)",
-        uiCaseItems=get_vibe_case_items("deprecated"),
+        uiCaseItems=get_vibe_case_items(),
     ),
     UICaseItemCluster(
         label="New-Int-Filter Search Performance Test",

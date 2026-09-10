@@ -10,7 +10,7 @@ import pytest
 
 from vectordb_bench import config
 from vectordb_bench.backend.assembler import Assembler
-from vectordb_bench.backend.cases import Performance
+from vectordb_bench.backend.cases import Performance, type2case
 from vectordb_bench.backend.clients import DB, EmptyDBCaseConfig, MetricType
 from vectordb_bench.backend.data_source import DatasetSource, HuggingFaceReader
 from vectordb_bench.backend.dataset import (
@@ -279,6 +279,45 @@ def test_vibe_case_cli_ui_and_preferred_source():
 
     with pytest.raises(ValueError, match="does not support filter"):
         Performance(dataset_name="glove-200-cosine", filter_rate=0.5)
+
+
+@pytest.mark.parametrize(
+    ("dataset_type", "legacy_case_type"),
+    (
+        (DatasetWithSizeType.CohereMedium, CaseType.Performance768D1M),
+        (DatasetWithSizeType.CohereLarge, CaseType.Performance768D10M),
+        (DatasetWithSizeType.LAIONLarge, CaseType.Performance768D100M),
+        (DatasetWithSizeType.BioasqMedium, CaseType.Performance1024D1M),
+        (DatasetWithSizeType.BioasqLarge, CaseType.Performance1024D10M),
+        (DatasetWithSizeType.OpenAISmall, CaseType.Performance1536D50K),
+        (DatasetWithSizeType.OpenAIMedium, CaseType.Performance1536D500K),
+        (DatasetWithSizeType.OpenAILarge, CaseType.Performance1536D5M),
+    ),
+)
+def test_registered_performance_preserves_legacy_timeouts(dataset_type, legacy_case_type):
+    registered = Performance(dataset_name=dataset_type.value)
+    legacy = type2case[legacy_case_type]()
+
+    assert registered.load_timeout == legacy.load_timeout == registered.dataset.load_timeout
+    assert registered.optimize_timeout == legacy.optimize_timeout == registered.dataset.optimize_timeout
+
+
+@pytest.mark.parametrize(
+    ("dataset_name", "load_timeout", "optimize_timeout"),
+    (
+        ("glove-200-cosine", config.LOAD_TIMEOUT_DEFAULT, config.OPTIMIZE_TIMEOUT_DEFAULT),
+        ("dpr-jina-768-normalized", config.LOAD_TIMEOUT_768D_10M, config.OPTIMIZE_TIMEOUT_768D_10M),
+        ("msmarco-qwen-1024-normalized", config.LOAD_TIMEOUT_1024D_10M, config.OPTIMIZE_TIMEOUT_1024D_10M),
+        ("hotpotqa-harrier-640-normalized", config.LOAD_TIMEOUT_768D_10M, config.OPTIMIZE_TIMEOUT_768D_10M),
+        ("multimodal-embedding-10m", config.LOAD_TIMEOUT_768D_10M, config.OPTIMIZE_TIMEOUT_768D_10M),
+        ("multimodal-embedding-100m", config.LOAD_TIMEOUT_768D_100M, config.OPTIMIZE_TIMEOUT_768D_100M),
+    ),
+)
+def test_new_registered_datasets_declare_performance_timeouts(dataset_name, load_timeout, optimize_timeout):
+    case = Performance(dataset_name=dataset_name)
+
+    assert case.load_timeout == case.dataset.load_timeout == load_timeout
+    assert case.optimize_timeout == case.dataset.optimize_timeout == optimize_timeout
 
 
 def test_registered_dataset_sizes_remain_separate_in_frontend_results():

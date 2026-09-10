@@ -479,6 +479,8 @@ class DatasetManager(BaseModel, ABC):
     """Common in-memory contract consumed by vector benchmark runners."""
 
     data: BaseDataset
+    load_timeout: float | int = config.LOAD_TIMEOUT_DEFAULT
+    optimize_timeout: float | int | None = config.OPTIMIZE_TIMEOUT_DEFAULT
     test_data: list[list[float]] | None = None
     gt_data: ParquetGroundTruth | list[list[int]] | None = None
     search_files: SearchDatasetFiles | None = None
@@ -1075,8 +1077,18 @@ class Dataset(Enum):
     def get(self, size: int) -> BaseDataset:
         return self.value(size=size)
 
-    def manager(self, size: int) -> DatasetManager:
-        return ParquetDatasetManager(data=self.get(size))
+    def manager(
+        self,
+        size: int,
+        *,
+        load_timeout: float = config.LOAD_TIMEOUT_DEFAULT,
+        optimize_timeout: float | None = config.OPTIMIZE_TIMEOUT_DEFAULT,
+    ) -> DatasetManager:
+        return ParquetDatasetManager(
+            data=self.get(size),
+            load_timeout=load_timeout,
+            optimize_timeout=optimize_timeout,
+        )
 
 
 class DatasetWithSizeType(Enum):
@@ -1122,14 +1134,45 @@ class DatasetWithSizeType(Enum):
 
 DatasetWithSizeMap = {
     DatasetWithSizeType.CohereSmall: Dataset.COHERE.manager(100_000),
-    DatasetWithSizeType.CohereMedium: Dataset.COHERE.manager(1_000_000),
-    DatasetWithSizeType.CohereLarge: Dataset.COHERE.manager(10_000_000),
-    DatasetWithSizeType.LAIONLarge: Dataset.LAION.manager(100_000_000),
-    DatasetWithSizeType.BioasqMedium: Dataset.BIOASQ.manager(1_000_000),
-    DatasetWithSizeType.BioasqLarge: Dataset.BIOASQ.manager(10_000_000),
-    DatasetWithSizeType.OpenAISmall: Dataset.OPENAI.manager(50_000),
-    DatasetWithSizeType.OpenAIMedium: Dataset.OPENAI.manager(500_000),
-    DatasetWithSizeType.OpenAILarge: Dataset.OPENAI.manager(5_000_000),
+    DatasetWithSizeType.CohereMedium: Dataset.COHERE.manager(
+        1_000_000,
+        load_timeout=config.LOAD_TIMEOUT_768D_1M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_768D_1M,
+    ),
+    DatasetWithSizeType.CohereLarge: Dataset.COHERE.manager(
+        10_000_000,
+        load_timeout=config.LOAD_TIMEOUT_768D_10M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_768D_10M,
+    ),
+    DatasetWithSizeType.LAIONLarge: Dataset.LAION.manager(
+        100_000_000,
+        load_timeout=config.LOAD_TIMEOUT_768D_100M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_768D_100M,
+    ),
+    DatasetWithSizeType.BioasqMedium: Dataset.BIOASQ.manager(
+        1_000_000,
+        load_timeout=config.LOAD_TIMEOUT_1024D_1M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_1024D_1M,
+    ),
+    DatasetWithSizeType.BioasqLarge: Dataset.BIOASQ.manager(
+        10_000_000,
+        load_timeout=config.LOAD_TIMEOUT_1024D_10M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_1024D_10M,
+    ),
+    DatasetWithSizeType.OpenAISmall: Dataset.OPENAI.manager(
+        50_000,
+        load_timeout=3600,
+    ),
+    DatasetWithSizeType.OpenAIMedium: Dataset.OPENAI.manager(
+        500_000,
+        load_timeout=config.LOAD_TIMEOUT_1536D_500K,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_1536D_500K,
+    ),
+    DatasetWithSizeType.OpenAILarge: Dataset.OPENAI.manager(
+        5_000_000,
+        load_timeout=config.LOAD_TIMEOUT_1536D_5M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_1536D_5M,
+    ),
 }
 
 
@@ -1140,6 +1183,9 @@ def _hdf5_manager(
     size: int,
     dimension: int,
     source_distance: str,
+    *,
+    load_timeout: float = config.LOAD_TIMEOUT_DEFAULT,
+    optimize_timeout: float | None = config.OPTIMIZE_TIMEOUT_DEFAULT,
 ) -> Hdf5DatasetManager:
     metric_type = (
         MetricType.L2
@@ -1147,6 +1193,8 @@ def _hdf5_manager(
         else MetricType.IP if source_distance == "ip" else MetricType.COSINE
     )
     return Hdf5DatasetManager(
+        load_timeout=load_timeout,
+        optimize_timeout=optimize_timeout,
         data=Hdf5Dataset(
             name=name,
             size=size,
@@ -1165,7 +1213,7 @@ def _hdf5_manager(
             distribution=distribution,
             modality=modality,
             dataset_metadata={"distribution": distribution},
-        )
+        ),
     )
 
 
@@ -1177,8 +1225,13 @@ def _parquet_manager(
     train_selectors: tuple[str, ...],
     query_selectors: tuple[str, ...],
     gt_selector: str,
+    *,
+    load_timeout: float = config.LOAD_TIMEOUT_DEFAULT,
+    optimize_timeout: float | None = config.OPTIMIZE_TIMEOUT_DEFAULT,
 ) -> ParquetDatasetManager:
     return ParquetDatasetManager(
+        load_timeout=load_timeout,
+        optimize_timeout=optimize_timeout,
         data=ParquetDataset(
             name=name,
             size=size,
@@ -1201,7 +1254,7 @@ def _parquet_manager(
                 "normalization": "l2",
                 "model": "Qwen3-VL-Embedding-8B",
             },
-        )
+        ),
     )
 
 
@@ -1223,6 +1276,8 @@ _PARQUET_DATASETS = (
         ("data/train-*.parquet",),
         ("data/test-*.parquet",),
         "data/neighbors.parquet",
+        load_timeout=config.LOAD_TIMEOUT_768D_10M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_768D_10M,
     ),
     _parquet_manager(
         "multimodal-embedding-100m",
@@ -1232,6 +1287,8 @@ _PARQUET_DATASETS = (
         ("train/shard-*/*.parquet",),
         ("test/*.parquet",),
         "neighbors/neighbors.parquet",
+        load_timeout=config.LOAD_TIMEOUT_768D_100M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_768D_100M,
     ),
 )
 
@@ -1239,16 +1296,43 @@ _PARQUET_DATASETS = (
 _HDF5_DATASETS = (
     _hdf5_manager("agnews-mxbai-1024-euclidean", "id", "Text", 769_382, 1024, "euclidean"),
     _hdf5_manager("arxiv-nomic-768-normalized", "id", "Text", 1_344_643, 768, "normalized"),
-    _hdf5_manager("dpr-jina-768-normalized", "id", "Text", 20_969_760, 768, "normalized"),
+    _hdf5_manager(
+        "dpr-jina-768-normalized",
+        "id",
+        "Text",
+        20_969_760,
+        768,
+        "normalized",
+        load_timeout=config.LOAD_TIMEOUT_768D_10M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_768D_10M,
+    ),
     _hdf5_manager("glove-200-cosine", "id", "Word", 1_192_514, 200, "cosine"),
     _hdf5_manager("gooaq-distilroberta-768-normalized", "id", "Text", 1_475_024, 768, "normalized"),
     _hdf5_manager("imagenet-clip-512-normalized", "id", "Image", 1_281_167, 512, "normalized"),
     _hdf5_manager("inaturalist-resnet-2048-cosine", "id", "Image", 499_000, 2048, "cosine"),
     _hdf5_manager("landmark-dino-768-cosine", "id", "Image", 760_757, 768, "cosine"),
     _hdf5_manager("landmark-nomic-768-normalized", "id", "Image", 760_757, 768, "normalized"),
-    _hdf5_manager("msmarco-qwen-1024-normalized", "id", "Text", 8_840_823, 1024, "normalized"),
+    _hdf5_manager(
+        "msmarco-qwen-1024-normalized",
+        "id",
+        "Text",
+        8_840_823,
+        1024,
+        "normalized",
+        load_timeout=config.LOAD_TIMEOUT_1024D_10M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_1024D_10M,
+    ),
     _hdf5_manager("yahoo-minilm-384-normalized", "id", "Text", 677_305, 384, "normalized"),
-    _hdf5_manager("hotpotqa-harrier-640-normalized", "ood", "Text", 5_233_329, 640, "normalized"),
+    _hdf5_manager(
+        "hotpotqa-harrier-640-normalized",
+        "ood",
+        "Text",
+        5_233_329,
+        640,
+        "normalized",
+        load_timeout=config.LOAD_TIMEOUT_768D_10M,
+        optimize_timeout=config.OPTIMIZE_TIMEOUT_768D_10M,
+    ),
     _hdf5_manager("imagenet-align-640-normalized", "ood", "Text-to-Image", 1_281_167, 640, "normalized"),
     _hdf5_manager("laion-clip-512-normalized", "ood", "Text-to-Image", 1_000_448, 512, "normalized"),
     _hdf5_manager("yandex-200-cosine", "ood", "Text-to-Image", 1_000_000, 200, "cosine"),

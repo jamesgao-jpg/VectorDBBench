@@ -975,6 +975,8 @@ class Performance(PerformanceCase):
             raise ValueError("Performance does not support filter parameters")
         dataset = get_dataset_manager(dataset_name)
         data = dataset.data
+        kwargs.setdefault("load_timeout", dataset.load_timeout)
+        kwargs.setdefault("optimize_timeout", dataset.optimize_timeout)
         super().__init__(
             dataset_name=dataset_name,
             name=f"Search Performance - {dataset_name}",

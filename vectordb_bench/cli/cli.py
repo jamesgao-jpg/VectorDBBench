@@ -204,12 +204,16 @@ are required """,
     return value
 
 
+def _get_performance_case_config(parameters: dict) -> dict:
+    dataset_name = parameters["dataset_name"]
+    if dataset_name is None:
+        raise click.UsageError("--dataset-name is required for Performance")
+    return {"dataset_name": dataset_name}
+
+
 def get_custom_case_config(parameters: dict) -> dict:
     if parameters["case_type"] == "Performance":
-        dataset_name = parameters["dataset_name"]
-        if dataset_name is None:
-            raise click.UsageError("--dataset-name is required for Performance")
-        return {"dataset_name": dataset_name}
+        return _get_performance_case_config(parameters)
     custom_case_config = {}
     dataset_with_size_type = parameters["dataset_with_size_type"] or DEFAULT_DATASET_WITH_SIZE_TYPE
     if parameters["case_type"] == "PerformanceCustomDataset":

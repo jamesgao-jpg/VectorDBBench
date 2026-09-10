@@ -281,6 +281,29 @@ def test_vibe_case_cli_ui_and_preferred_source():
         Performance(dataset_name="glove-200-cosine", filter_rate=0.5)
 
 
+def test_registered_dataset_sizes_remain_separate_in_frontend_results():
+    dataset_names = (DatasetWithSizeType.CohereSmall.value, DatasetWithSizeType.CohereLarge.value)
+    results = [
+        CaseResult(
+            metrics=Metric(),
+            task_config=TaskConfig(
+                db=DB.Test,
+                db_config=DB.Test.config_cls(),
+                db_case_config=EmptyDBCaseConfig(),
+                case_config=CaseConfig(case_id=CaseType.Performance, custom_case={"dataset_name": dataset_name}),
+            ),
+        )
+        for dataset_name in dataset_names
+    ]
+
+    merged, failed = mergeTasks(results)
+
+    assert not failed
+    assert {result["case_name"] for result in merged} == {
+        f"Search Performance - {dataset_name}" for dataset_name in dataset_names
+    }
+
+
 def test_vibe_k_above_100_fails_during_case_config_validation():
     with pytest.raises(ValueError, match="K from 1 to 100"):
         CaseConfig(

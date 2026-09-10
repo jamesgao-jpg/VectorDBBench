@@ -977,7 +977,7 @@ class Performance(PerformanceCase):
         data = dataset.data
         super().__init__(
             dataset_name=dataset_name,
-            name=f"Search Performance - {data.name}",
+            name=f"Search Performance - {dataset_name}",
             description=(
                 f"Unfiltered search using {data.metric_type.value}, {data.dim} dimensions, "
                 f"and {data.size:,} corpus vectors."

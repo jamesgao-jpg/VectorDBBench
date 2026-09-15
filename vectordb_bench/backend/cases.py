@@ -1,6 +1,7 @@
 import json
 import logging
 from enum import Enum, auto
+from pathlib import Path
 
 from vectordb_bench import config
 from vectordb_bench.backend.clients.api import MetricType
@@ -83,6 +84,7 @@ class CaseType(Enum):
     CloudInsertCase = 600
     CloudColdLatencyCase = 700
     CloudMultiTenantSearchCase = 800
+    TurboPufferMultiTenantColdStart = 900
 
     def case_cls(self, custom_configs: dict | None = None) -> type["Case"]:
         if custom_configs is None:
@@ -109,6 +111,7 @@ class CaseLabel(Enum):
     CloudInsert = auto()
     CloudColdLatency = auto()
     FullTextSearchPerformance = auto()
+    TurboPufferMultiTenantColdStart = auto()
 
 
 class Case(BaseModel):
@@ -754,6 +757,77 @@ class CloudColdLatencyCase(Case):
         return NewIntFilter(filter_rate=self.filter_rate, int_field=int_field, int_value=int_value)
 
 
+class TurboPufferMultiTenantColdStartCase(Case):
+    case_id: CaseType = CaseType.TurboPufferMultiTenantColdStart
+    label: CaseLabel = CaseLabel.TurboPufferMultiTenantColdStart
+    operation: str
+    manifest_path: str
+    prepared_data: str | None = None
+    run_prefix: str | None = None
+    dense_field: str = "emb_768"
+    bm25_field: str = "content"
+    group: str = "all"
+    output_fields: tuple[str, ...] = ()
+
+    def __init__(
+        self,
+        operation: str,
+        manifest_path: str,
+        prepared_data: str | None = None,
+        run_prefix: str | None = None,
+        dense_field: str = "emb_768",
+        bm25_field: str = "content",
+        group: str = "all",
+        output_fields: tuple[str, ...] | list[str] = (),
+        **kwargs,
+    ):
+        operation = operation.lower()
+        group = group if group == "all" else group.upper()
+        output_fields = tuple(output_fields)
+        if operation not in {"setup", "dense", "bm25"}:
+            raise ValueError("operation must be setup, dense, or bm25")
+        if not manifest_path:
+            raise ValueError("manifest_path is required")
+        if operation == "setup" and (not prepared_data or not run_prefix):
+            raise ValueError("setup requires prepared_data and run_prefix")
+        if group not in {"all", "A", "B", "C", "D"}:
+            raise ValueError("group must be all, A, B, C, or D")
+        if operation == "setup" and group != "all":
+            raise ValueError("setup always creates all namespace groups")
+        if operation == "setup" and output_fields:
+            raise ValueError("output_fields apply only to dense and bm25 operations")
+        if len(set(output_fields)) != len(output_fields) or "id" in output_fields:
+            raise ValueError("output_fields must be unique and must not contain id")
+
+        data_path = Path(prepared_data or manifest_path)
+        total_rows = {"all": 14_000_000, "A": 3_000_000, "B": 3_000_000, "C": 3_000_000, "D": 5_000_000}
+        dataset = CustomDataset(
+            name="TurbopufferMultiTenant",
+            size=total_rows[group],
+            dim=768,
+            metric_type=MetricType.COSINE,
+            use_shuffled=False,
+            with_gt=False,
+            dir=str(data_path.parent),
+            file_num=1,
+            train_file=data_path.stem,
+        )
+        super().__init__(
+            name=f"Turbopuffer Multi-Tenant {operation.title()} ({group})",
+            description="Sequential first-query and repeat-query latency across turbopuffer namespaces.",
+            dataset=ParquetDatasetManager(data=dataset),
+            operation=operation,
+            manifest_path=manifest_path,
+            prepared_data=prepared_data,
+            run_prefix=run_prefix,
+            dense_field=dense_field,
+            bm25_field=bm25_field,
+            group=group,
+            output_fields=output_fields,
+            **kwargs,
+        )
+
+
 class CloudInsertCase(Case):
     case_id: CaseType = CaseType.CloudInsertCase
     label: CaseLabel = CaseLabel.CloudInsert
@@ -1031,4 +1105,5 @@ type2case = {
     CaseType.CloudInsertCase: CloudInsertCase,
     CaseType.CloudColdLatencyCase: CloudColdLatencyCase,
     CaseType.CloudMultiTenantSearchCase: CloudMultiTenantSearchCase,
+    CaseType.TurboPufferMultiTenantColdStart: TurboPufferMultiTenantColdStartCase,
 }

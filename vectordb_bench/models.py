@@ -430,13 +430,23 @@ class TestResult(BaseModel):
                 "cold_latency": metrics["additional_parameters"].get("cold_latency", {}),
             }
 
+        if case_id == CaseType.TurboPufferMultiTenantColdStart:
+            return {
+                "inserted_count": metrics["inserted_count"],
+                "turbopuffer_multitenant": metrics["additional_parameters"].get("turbopuffer_multitenant", {}),
+            }
+
         return metrics
 
     @staticmethod
     def _output_case_config_for_case(case_result: CaseResult) -> dict:
         case_config = case_result.task_config.case_config
 
-        if case_config.case_id in {CaseType.CloudInsertCase, CaseType.CloudColdLatencyCase}:
+        if case_config.case_id in {
+            CaseType.CloudInsertCase,
+            CaseType.CloudColdLatencyCase,
+            CaseType.TurboPufferMultiTenantColdStart,
+        }:
             return {
                 "case_id": case_config.case_id.value,
                 "custom_case": case_config.custom_case,

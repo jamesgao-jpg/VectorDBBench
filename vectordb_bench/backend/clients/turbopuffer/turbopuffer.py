@@ -110,6 +110,7 @@ class TurboPuffer(VectorDB):
         self.api_key = db_config.get("api_key", "")
         self.region = db_config.get("region", "")
         self.api_base_url = db_config.get("api_base_url")
+        self.max_retries = kwargs.get("max_retries")
         self.namespace = db_config.get("namespace", "")
         self.multitenant_namespace_prefix = db_config.get("multitenant_namespace_prefix", "vdbbench_mt_")
         self.multitenant_tenant_labels: list[str] = kwargs.get("multitenant_tenant_labels", [])
@@ -152,7 +153,9 @@ class TurboPuffer(VectorDB):
 
     def _create_client(self) -> tpuf.Turbopuffer:
         client_kwargs = {"api_key": self.api_key, "region": self.region}
-        max_retries = os.getenv("TURBOPUFFER_MAX_RETRIES")
+        max_retries = self.max_retries
+        if max_retries is None:
+            max_retries = os.getenv("TURBOPUFFER_MAX_RETRIES")
         if max_retries is not None:
             client_kwargs["max_retries"] = int(max_retries)
         if self.api_base_url:

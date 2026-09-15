@@ -214,6 +214,27 @@ def _get_performance_case_config(parameters: dict) -> dict:
 def get_custom_case_config(parameters: dict) -> dict:
     if parameters["case_type"] == "Performance":
         return _get_performance_case_config(parameters)
+    if parameters["case_type"] == "TurboPufferMultiTenantColdStart":
+        operation = parameters.get("multitenant_operation")
+        manifest = parameters.get("multitenant_manifest")
+        if operation is None or manifest is None:
+            raise click.UsageError("--multitenant-operation and --multitenant-manifest are required")
+        custom_case_config = {
+            "operation": operation,
+            "manifest_path": manifest,
+            "group": parameters.get("multitenant_group", "all"),
+            "output_fields": parameters.get("multitenant_output_fields", []),
+        }
+        if operation == "setup":
+            custom_case_config.update(
+                {
+                    "prepared_data": parameters.get("multitenant_prepared_data"),
+                    "run_prefix": parameters.get("multitenant_run_prefix"),
+                    "dense_field": parameters.get("multitenant_dense_field", "emb_768"),
+                    "bm25_field": parameters.get("multitenant_bm25_field", "content"),
+                }
+            )
+        return custom_case_config
     custom_case_config = {}
     dataset_with_size_type = parameters["dataset_with_size_type"] or DEFAULT_DATASET_WITH_SIZE_TYPE
     if parameters["case_type"] == "PerformanceCustomDataset":
@@ -987,6 +1008,7 @@ def run(
         update={"note": resolve_db_note(parameters["note"], parameters["note_file"])},
     )
 
+    is_turbopuffer_multitenant = parameters["case_type"] == "TurboPufferMultiTenantColdStart"
     task = TaskConfig(
         db=db,
         db_config=db_config,
@@ -1003,7 +1025,9 @@ def run(
             ),
             custom_case=get_custom_case_config(parameters),
         ),
-        stages=parse_task_stages(
+        stages=[]
+        if is_turbopuffer_multitenant
+        else parse_task_stages(
             (False if not parameters["load"] else parameters["drop_old"]),  # only drop old data if loading new data
             parameters["load"],
             parameters["search_serial"],

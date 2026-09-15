@@ -6,6 +6,7 @@ from pydantic import SecretStr
 from ....cli.cli import (
     CommonTypedDict,
     cli,
+    click_arg_split,
     click_parameter_decorators_from_typed_dict,
     run,
 )
@@ -140,6 +141,82 @@ class TurboPufferTypedDict(TypedDict):
             help="TurboPuffer cache warmup policy for CloudMultiTenantSearchCase tenant namespaces",
         ),
     ]
+    multitenant_operation: Annotated[
+        str | None,
+        click.option(
+            "--multitenant-operation",
+            type=click.Choice(["setup", "dense", "bm25"]),
+            default=None,
+            help="Operation for TurboPufferMultiTenantColdStart",
+        ),
+    ]
+    multitenant_manifest: Annotated[
+        str | None,
+        click.option(
+            "--multitenant-manifest",
+            type=click.Path(dir_okay=False),
+            default=None,
+            help="Setup manifest written or read by TurboPufferMultiTenantColdStart",
+        ),
+    ]
+    multitenant_prepared_data: Annotated[
+        str | None,
+        click.option(
+            "--multitenant-prepared-data",
+            type=click.Path(dir_okay=False),
+            default=None,
+            help="Prepared Parquet input for the setup operation",
+        ),
+    ]
+    multitenant_run_prefix: Annotated[
+        str | None,
+        click.option(
+            "--multitenant-run-prefix",
+            type=str,
+            default=None,
+            help="Unique namespace prefix for the setup operation",
+        ),
+    ]
+    multitenant_dense_field: Annotated[
+        str,
+        click.option(
+            "--multitenant-dense-field",
+            type=str,
+            default="emb_768",
+            show_default=True,
+            help="Vector field recorded in the setup manifest",
+        ),
+    ]
+    multitenant_bm25_field: Annotated[
+        str,
+        click.option(
+            "--multitenant-bm25-field",
+            type=str,
+            default="content",
+            show_default=True,
+            help="Full-text field indexed and recorded in the setup manifest",
+        ),
+    ]
+    multitenant_group: Annotated[
+        str,
+        click.option(
+            "--multitenant-group",
+            type=click.Choice(["all", "A", "B", "C", "D"]),
+            default="all",
+            show_default=True,
+            help="Namespace-size group measured by dense or BM25 operations",
+        ),
+    ]
+    multitenant_output_fields: Annotated[
+        list[str],
+        click.option(
+            "--multitenant-output-fields",
+            type=str,
+            default="",
+            callback=click_arg_split,
+            help="Comma-separated attributes returned with IDs during measurement",
+        ),
+    ]
 
 
 class TurboPufferIndexTypedDict(CommonTypedDict, TurboPufferTypedDict): ...
@@ -202,6 +279,8 @@ def pin_namespaces_once(parameters: TurboPufferIndexTypedDict) -> None:
 def TurboPuffer(**parameters: Unpack[TurboPufferIndexTypedDict]):
     from .config import TurboPufferConfig, TurboPufferIndexConfig
 
+    if parameters["case_type"] == "TurboPufferMultiTenantColdStart" and parameters["pin_namespace"]:
+        raise click.UsageError("TurboPufferMultiTenantColdStart does not support namespace pinning")
     pin_target_namespace_count = len(target_namespaces_for_pinning(parameters)) if parameters["pin_namespace"] else 0
     if parameters["pin_namespace"] and not parameters["dry_run"]:
         pin_namespaces_once(parameters)

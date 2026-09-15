@@ -1,4 +1,4 @@
-# Turbopuffer multi-tenant cold-start experiment (revised draft)
+# Turbopuffer multi-tenant cold-start experiment
 
 **Rationale:** [Turbopuffer multi-tenant test](https://zilliverse.feishu.cn/wiki/Kdc3wiyAyihSmMkSIhhcHKMrnih)
 
@@ -72,49 +72,81 @@ AWS_SHARED_CREDENTIALS_FILE=/home/ubuntu/.aws/vdbbench-turbopuffer-multitenant \
 
 Successful output is a JSON summary with `output_rows` equal to `5000000`. The command refuses to replace an existing output file.
 
-## One benchmark case
+## One benchmark case with three operations
 
-Register one case type: `TurboPufferMultiTenantColdStart`. Each invocation selects one query mode: `dense` or `bm25`. Hybrid search and explicit sparse-vector `SparseKNN` are outside the first version.
+Register one case type: `TurboPufferMultiTenantColdStart`. Separate invocations select `setup`, `dense`, or `bm25`. Hybrid search and explicit sparse-vector `SparseKNN` are outside the first version.
 
-The setup stage loads the 4,201 namespaces without issuing search queries. The search stage launches the existing cold/warm measurement logic against each namespace sequentially. Each per-namespace run uses exactly one query:
+The setup operation loads all 4,201 namespaces without issuing search queries. Dense and BM25 operations use the completed setup manifest and query the selected distribution (`all`, `A`, `B`, `C`, or `D`) sequentially. Each namespace uses exactly one saved query fixture:
 
 1. Bind a turbopuffer client to one namespace from the manifest.
 2. Run one first query and retain it as that namespace's cold sample.
 3. Repeat the same query immediately and retain it as that namespace's after-first-query sample.
 4. Continue to the next namespace with no concurrent requests.
 
-No tenant argument is required on `search_embedding()` or `search_documents()` because each run is bound to a single namespace. Aggregate the individual samples by the namespace's row-count group so A/B/C provide cold and repeat-query latency distributions. Group D has one namespace and therefore produces an individual observation rather than a percentile distribution.
+No tenant argument is required because the runner selects one namespace before issuing each `CustomizedRequest`. Aggregate the individual samples by the namespace's row-count group so A/B/C provide first-query and repeat-query latency distributions. Group D has one namespace and therefore produces an individual observation rather than a percentile distribution.
 
 Use a deterministic permutation of namespaces, stored in the manifest, so groups are interleaved and repeated runs are comparable. Do not insert an artificial one-second delay; the experiment is serial because only one request is in flight.
 
-For `dense`, use cosine ANN, `topK=100`, no filter, and IDs only. Select one query vector deterministically from that namespace's rows.
+For `dense`, use cosine ANN, `topK=100`, no filter, and IDs only by default. Select one query vector deterministically from that namespace's rows.
 
-For `bm25`, invoke `search_documents()` with a deterministic text query and a configured full-text field. The initial field is `content`; the API must not hardcode the existing `text` field so another declared string field can be selected later. Use `topK=100`, no filter, and IDs only.
+For `bm25`, issue a customized BM25 request with a deterministic text query and the configured full-text field. The initial field is `content`. Use `topK=100`, no filter, and IDs only by default.
+
+The setup manifest stores the authoritative dense and BM25 field names. `--multitenant-dense-field` and `--multitenant-bm25-field` apply only to setup. Search invocations read those names from the manifest. `--multitenant-output-fields` optionally requests comma-separated declared attributes such as `vc_uuid,vc_tag`; returned values are validated and discarded, while only counts, timing, and cache metadata are persisted.
 
 Run dense and BM25 as separate benchmark invocations. A query of either type can warm namespace data, so both modes cannot claim a cold pass against the same already-queried prefix. Give each mode a fresh namespace prefix, or explicitly label the second mode as an after-prior-query experiment.
 
-Record client latency, `cache_hit_ratio`, `cache_temperature`, `server_total_ms`, `query_execution_ms`, namespace group, namespace name, query mode, pass, ordinal position, result count, and errors. Do not retry failed queries inside the measured pass. [Turbopuffer query response](https://turbopuffer.com/docs/query).
+Before every measured query, append a `started` event to the mode-specific JSONL artifact. Append `completed` or `error` after the call. Record client latency, `cache_hit_ratio`, `cache_temperature`, `server_total_ms`, `query_execution_ms`, namespace group, namespace name, query mode, pass, result count, and error type. Do not persist query vectors, query text, returned IDs, returned attribute values, or exception messages. Do not retry a measured query in either VDBBench or the SDK. [Turbopuffer query response](https://turbopuffer.com/docs/query).
+
+On resume, a `started` event without a terminal event becomes `indeterminate` and is never rerun. A repeat query with no `started` event after a completed first query is safe to run. A failed or indeterminate first query causes its repeat to be marked `skipped`. Query failures do not stop collection for later namespaces, but the invocation exits as incomplete after writing the summary.
+
+The compact summary reports outcomes plus client average/P50/P95/P99 and server-total/query-execution average/P50/P95/P99 for each group and pass. It also points to the raw JSONL event artifact. Group-specific invocations share the mode-specific event file, so completed namespace samples remain resumable across `A`/`B`/`C`/`D` runs.
 
 The repeat observation means "queried once before" rather than guaranteed cache residency. Turbopuffer has no verified public cache-eviction operation, and its warm-cache hint does not confirm that warming completed. Report the returned cache state rather than relabeling observations based on assumption. [Warm-cache API](https://turbopuffer.com/docs/warm-cache).
 
 Rerunning a true cold pass requires a new namespace prefix. Search-only reruns against the same prefix are repeat-query measurements.
 
-## Supporting implementation required before a live test
+### CLI
+
+Run setup once for a namespace prefix:
+
+```bash
+PYTHONPATH=/home/ubuntu/VectorDBBench-stage1-test \
+  /home/ubuntu/VectorDBBench/.venv/bin/vectordbbench turbopuffer \
+  --api-key "$TURBOPUFFER_API_KEY" --region "$TURBOPUFFER_REGION" \
+  --case-type TurboPufferMultiTenantColdStart \
+  --multitenant-operation setup \
+  --multitenant-manifest /home/ubuntu/vdbbench-data-inspect/dense-setup.json \
+  --multitenant-prepared-data /home/ubuntu/vdbbench-data-inspect/turbopuffer_multitenant_5m.parquet \
+  --multitenant-run-prefix multi_tenant_dense
+```
+
+Measure all distributions or one selected group:
+
+```bash
+PYTHONPATH=/home/ubuntu/VectorDBBench-stage1-test \
+  /home/ubuntu/VectorDBBench/.venv/bin/vectordbbench turbopuffer \
+  --api-key "$TURBOPUFFER_API_KEY" --region "$TURBOPUFFER_REGION" \
+  --case-type TurboPufferMultiTenantColdStart \
+  --multitenant-operation dense \
+  --multitenant-manifest /home/ubuntu/vdbbench-data-inspect/dense-setup.json \
+  --multitenant-group all --k 100
+```
+
+BM25 requires a separately prepared namespace prefix and manifest if its first pass is to be described as cold. Replace `dense` with `bm25` and optionally add `--multitenant-output-fields vc_uuid,vc_tag`. Setup always creates all four distributions; `--multitenant-group` controls only the search runtime.
+
+## Supporting implementation status before a live test
 
 ### Wide source and schema
 
-- Add a one-time standalone preparation script that uses the AWS credential chain, downloads enough source Parquets for 5M rows, projects and validates the eleven selected fields, assigns deterministic IDs, renames `$meta`, and writes one prepared Parquet file.
-- Add a VDBBench streaming iterator for that prepared file. It must preserve the projected Arrow types and must not materialize the 5M rows in memory.
+- Implemented a one-time standalone preparation script that uses the AWS credential chain, downloads enough source Parquets for 5M rows, projects and validates the eleven selected fields, assigns deterministic IDs, renames `$meta`, and writes one prepared Parquet file.
+- Implemented a bounded VDBBench streaming iterator for that prepared file.
 - Reuse the prepared file for each namespace group: read 3M rows for each of A-C and all 5M rows for D.
-- Add deterministic row-to-namespace slicing for the A/B/C/D counts. The existing `row_id % tenant_count` distribution cannot produce different namespace sizes.
-- Save one deterministic dense query vector and one deterministic BM25 query string for every namespace in a small query-fixture artifact referenced by the manifest.
+- Implemented deterministic row-to-namespace slicing for the A/B/C/D counts.
+- Save one deterministic dense query vector and one deterministic BM25 query string for every namespace in an atomic query-fixture artifact referenced by the manifest.
 
 ### Backend-neutral customized-data bridge
 
-- Add a customized-row contract containing an ID and named fields, with one shared schema declaration per insertion call. Keep the existing vector and FTS insertion methods unchanged for current cases.
-- Add an optional `insert_customized_rows()` capability to `VectorDB`, with a default unsupported implementation so existing backends are unaffected.
-- Add an optional structured query result containing IDs plus backend timing/cache metadata. Current search methods return IDs and discard the turbopuffer response metadata needed by this experiment.
-- Add a `CustomizedRequest` containing query mode, target field, vector or text value, `topK`, and included fields. It should express dense and BM25 requests without exposing a raw backend request through the case interface.
+- Implemented the customized-row contract, optional `VectorDB` methods, `CustomizedRequest`, and structured `SearchResult` described below.
 
 The simplest alternative is a turbopuffer-specific wide-table adapter called directly by this case. It would be shorter, but it would duplicate client creation, error handling, schema writing, and query response parsing. The proposed optional `insert_customized_rows()` and `search_customized_queries()` capabilities are justified because they bridge the actual VDBBench data-model gap while preserving all existing case interfaces.
 
@@ -201,7 +233,7 @@ def search_documents(self, query, k=100, payload_profile=IDS_ONLY, **kwargs):
 
 The wide case can use the existing `TurboPufferIndexConfig` with cosine distance. It does not need a second FTS case configuration because the insertion schema declares `content` as full-text searchable and each `CustomizedRequest` identifies its target field. This removes the current vector-versus-FTS configuration split only for the optional customized-data path.
 
-The insertion pipeline streams bounded lists of `CustomizedRow`. The namespace slicer consumes rows in deterministic source order, closes a write batch at its configured byte or row limit without crossing a namespace boundary, binds a turbopuffer client to that namespace, and calls `insert_customized_rows()`. The manifest advances only after the inserted count and namespace metadata match the expected count.
+The insertion pipeline streams bounded lists of `CustomizedRow`. The namespace slicer consumes rows in deterministic source order, closes a write batch at its configured row limit without crossing a namespace boundary, binds a turbopuffer client to that namespace, and calls `insert_customized_rows()`. The setup checkpoint advances only after every expected row has been acknowledged and the namespace query fixture has been saved atomically.
 
 The search pipeline reconstructs one `CustomizedRequest` from each namespace's saved fixture, calls `search_customized_queries([request])` once for the cold sample and once for the repeat sample, and immediately appends each result to the JSONL result artifact. Aggregation consumes that artifact, so resume and reporting do not require keeping all 4,201 namespace results in memory.
 
@@ -215,23 +247,21 @@ Do not create a generic backend schema language beyond the six field kinds neede
 - Implement structured dense queries against `emb_768` and BM25 queries against the configured field, initially `content`.
 - Support arbitrary `include_attributes` from the declared schema even though the first cold-latency run uses IDs only.
 - Return turbopuffer performance metadata to the runner rather than reducing the SDK response immediately to IDs.
-- Add namespace row-count/readiness checks and record them in the manifest before allowing a cold-latency run.
+- Require every namespace to have a completed setup checkpoint and query fixture before allowing measurement. No readiness polling is part of this experiment.
 
 ### Cold-latency orchestration and results
 
-- Reuse the existing cold/warm runner's two-pass timing and percentile helpers, but call it once per namespace with `query_count=1`.
-- Add query dispatch through `search_customized_queries()`: dense mode follows the same implementation as `search_embedding()`, while BM25 mode follows the same implementation as `search_documents(field_name="content")`. The structured entry point preserves response metadata that the existing ID-only methods discard.
-- Disable benchmark-level retries for measured queries. Record a failed first or repeat query as a sample with its error category.
-- Persist every per-namespace sample before advancing so a long 4,201-namespace run can be resumed without losing completed observations.
-- Aggregate by `row_count × query_mode × pass`, reporting sample count, failures, average, P50, P95, and P99. Report D as a single observation.
-- Keep first-query and repeat-query results separate; do not combine them into one latency distribution.
-- Store the namespace order and completed-query state so resume never accidentally reclassifies an already-queried namespace as cold.
+- Implemented a dedicated serial first/repeat runner around `search_customized_queries()` so the turbopuffer response metadata is retained.
+- Disabled both benchmark-level and SDK-level retries for this case's measured queries.
+- Persist each query transition before advancing and preserve interrupted queries as indeterminate.
+- Aggregate each namespace group and pass separately, including outcomes and client/server latency distributions.
+- Store the deterministic namespace order and completed-query state so resume never reclassifies an already-started namespace query as cold.
 
 ### Verification gates
 
 - Add deterministic unit tests for wide Parquet projection, namespace slicing, schema conversion, dense/BM25 dispatch, response metadata, aggregation, failure recording, and resume behavior.
 - Run focused VDBBench tests on the designated remote client according to `AGENTS.md`.
-- Run a disposable pilot with a few tiny namespaces to verify the actual turbopuffer schema, field returns, BM25 index readiness, query metadata, and cold/repeat classification.
+- Run a disposable pilot with a few tiny namespaces to verify the actual turbopuffer schema, field returns, BM25 query behavior, query metadata, and first/repeat classification.
 - Inspect the pilot artifact and confirm that no credentials or full row payloads appear in logs or results before loading the 14M-row setup.
 
 No scale flag, fixed-QPS scheduler, max-QPS ramp, hybrid/RRF query, explicit sparse-vector field, eviction emulation, D/E replicas, or aggregate 1 TB guard is part of this implementation.

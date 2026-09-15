@@ -43,6 +43,7 @@ class _FakeDB:
         self.rows = {}
         self.insert_calls = 0
         self.fail_once_for = None
+        self.last_schema = None
 
     @classmethod
     def supports_customized_api(cls) -> bool:
@@ -77,6 +78,7 @@ class _FakeDB:
             "arr_str_labels",
             "meta_json",
         }
+        self.last_schema = schema
         self.insert_calls += 1
         namespace_rows = self.rows.setdefault(self.active_namespace, {})
         for row in rows:
@@ -111,6 +113,7 @@ def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path:
     assert list(db.rows["run_4_01"]) == [0, 1, 2, 3]
     manifest_data = json.loads(manifest.read_text())
     assert len(manifest_data["namespaces"]) == 3
+    assert manifest_data["search_fields"] == {"dense": "emb_768", "bm25": "content"}
     assert sorted(manifest_data["search_order"]) == ["run_2_01", "run_2_02", "run_4_01"]
     fixture = json.loads((tmp_path / "setup.fixtures/run_2_02.json").read_text())
     assert fixture["id"] == 2
@@ -122,6 +125,28 @@ def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path:
     assert resumed["inserted_rows"] == 0
     assert resumed["completed_namespaces"] == 3
     assert db.insert_calls == calls_before_resume
+
+
+def test_setup_can_select_the_manifest_bm25_field(tmp_path: Path) -> None:
+    prepared = tmp_path / "prepared.parquet"
+    _write_prepared(prepared, rows=2)
+    db = _FakeDB()
+    manifest = tmp_path / "setup.json"
+
+    MultiTenantSetupRunner(
+        db,
+        PreparedMultiTenantDataset(prepared, (NamespaceGroup("A", "2", 2, 1, 2),)),
+        manifest,
+        "run",
+        bm25_field="vc_desc",
+        max_retries=0,
+    ).run()
+
+    assert db.last_schema["content"].full_text_search is False
+    assert db.last_schema["vc_desc"].full_text_search is True
+    assert json.loads(manifest.read_text())["search_fields"]["bm25"] == "vc_desc"
+    fixture = json.loads((tmp_path / "setup.fixtures/run_2_01.json").read_text())
+    assert fixture["bm25"] == {"field": "vc_desc", "value": "description-0"}
 
 
 def test_setup_resumes_started_namespace_with_idempotent_ids(tmp_path: Path) -> None:

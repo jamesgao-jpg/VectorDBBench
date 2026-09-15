@@ -22,6 +22,8 @@ class Assembler:
     @classmethod
     def assemble(cls, run_id: str, task: TaskConfig, source: DatasetSource) -> CaseRunner:
         c = task.case_config.case
+        if c.label == CaseLabel.TurboPufferMultiTenantColdStart and task.db != DB.TurboPuffer:
+            raise ValueError("TurboPufferMultiTenantColdStart supports only the TurboPuffer backend")
         if c.label == CaseLabel.FullTextSearchPerformance and not task.db.init_cls.supports_full_text_search():
             msg = f"{task.db.value} does not support full-text search"
             raise ValueError(msg)
@@ -58,6 +60,9 @@ class Assembler:
         streaming_runners = [r for r in runners if r.ca.label == CaseLabel.Streaming]
         cloud_insert_runners = [r for r in runners if r.ca.label == CaseLabel.CloudInsert]
         cloud_cold_latency_runners = [r for r in runners if r.ca.label == CaseLabel.CloudColdLatency]
+        turbopuffer_multitenant_runners = [
+            r for r in runners if r.ca.label == CaseLabel.TurboPufferMultiTenantColdStart
+        ]
         fts_runners = [r for r in runners if r.ca.label == CaseLabel.FullTextSearchPerformance]
 
         search_filter_runners = [*perf_runners, *cloud_cold_latency_runners]
@@ -85,6 +90,7 @@ class Assembler:
         all_runners.extend(load_runners)
         all_runners.extend(streaming_runners)
         all_runners.extend(cloud_insert_runners)
+        all_runners.extend(turbopuffer_multitenant_runners)
         for v in db2runner.values():
             all_runners.extend(v)
         all_runners.extend(fts_runners)

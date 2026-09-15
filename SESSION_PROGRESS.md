@@ -1,7 +1,7 @@
 # Session Progress
 
-**Date:** 2026-09-14
-**Working Directory:** /Users/james.gao/Desktop/VectorDBBench
+**Date:** 2026-09-15
+**Working Directory:** /Users/james.gao/Desktop/VectorDBBench-turbopuffer
 
 ## Completed Work
 
@@ -81,11 +81,20 @@ The setup runner refuses untracked existing namespaces, records `started` before
 Verified on the assigned remote worktree: 10 focused preparation/setup/client tests passed. A footer-only check against the real prepared file produced exactly 4,201 namespace specifications totaling 14,000,000 planned inserts, from `multi_tenant_1000_0001` through `multi_tenant_5m_0000001`. No live turbopuffer namespace was created.
 - Files: `vectordb_bench/backend/turbopuffer_multitenant.py` (created), `vectordb_bench/backend/clients/api.py` (updated), `vectordb_bench/backend/clients/turbopuffer/turbopuffer.py` (updated), `tests/test_turbopuffer_multitenant_setup.py` (created), `tests/test_turbopuffer_customized.py` (updated), `AGENTS.md` (updated, repository-local and ignored)
 
+### 17. Implement the Stage 3 benchmark case
+Registered `TurboPufferMultiTenantColdStart` and exposed independent `setup`, `dense`, and `bm25` operations through the turbopuffer CLI. Setup always creates A/B/C/D, while search can run all distributions in deterministic interleaved order or select one group. The setup manifest is version 2 and stores the dense and BM25 field contract. Search optionally fetches declared output fields, validates them, and discards their values.
+
+Added a dedicated sequential search runner that records `started` before every first/repeat query and writes a terminal event afterward. It does not retry measured queries at either the benchmark or turbopuffer SDK layer. Interrupted requests become indeterminate; a repeat that has not started after a completed first request remains safe to resume. Query errors are recorded without payloads or exception messages, later namespaces continue, and the invocation reports incomplete after preserving its artifacts.
+
+Mode-specific JSONL artifacts contain per-namespace outcomes, client timing, turbopuffer performance metadata, and result counts. Compact summaries group first and repeat observations by A/B/C/D and report outcomes plus client, server-total, and query-execution average/P50/P95/P99. Dense and BM25 reject reuse of the same setup manifest so both cannot silently claim cold measurements against namespaces already queried by the other mode.
+
+Verified on the assigned remote worktree: 19 focused Stage 1-3 client, setup, CLI/config, search, resume, aggregation, and serialization tests passed. A CLI help check and dry-run also exposed the new options and produced a task with no generic VDBBench stages. No live turbopuffer request was issued.
+- Files: `vectordb_bench/backend/turbopuffer_multitenant.py` (updated), `vectordb_bench/backend/cases.py` (updated), `vectordb_bench/backend/assembler.py` (updated), `vectordb_bench/backend/task_runner.py` (updated), `vectordb_bench/backend/clients/turbopuffer/cli.py` (updated), `vectordb_bench/backend/clients/turbopuffer/turbopuffer.py` (updated), `vectordb_bench/cli/cli.py` (updated), `vectordb_bench/models.py` (updated), `tests/test_turbopuffer_multitenant_case.py` (created), `tests/test_turbopuffer_multitenant_setup.py` (updated), `tests/test_turbopuffer_customized.py` (updated), `docs/turbopuffer-scaled-multitenant-design.md` (updated), `AGENTS.md` (updated, repository-local and ignored)
+
 ## Current Status
-The design and four implementation stages are recorded. Stage 1 is committed. Stage 2's 5M-row preparation script, prepared remote artifact, namespace loader, manifest, checkpoints, and query fixtures are implemented and verified in matching local and remote `codex/turbopuffer_multitenant` worktrees. The Stage 3 benchmark case is not implemented, and no live turbopuffer namespace has been created.
+The design and four implementation stages are recorded. Stages 1 and 2 are committed. Stage 3 is implemented and remotely verified but not committed. The 5M-row prepared artifact remains available on the remote client. No live turbopuffer namespace has been created.
 
 ## Open Issues
 - Configure a turbopuffer API key and region on the remote client before the stage-4 live pilot; keep them out of files, logs, and results.
 - Confirm with the stage-4 live pilot that the projected wide schema and deterministic IDs are accepted by turbopuffer.
-- Register the Stage 3 benchmark case and expose setup, dense, and BM25 invocations through the VDBBench configuration path.
 - The second pass is an after-one-query observation, not guaranteed cache residency; use the backend-reported cache state when interpreting it.

@@ -152,3 +152,22 @@ def test_turbopuffer_selects_and_checks_customized_namespace() -> None:
     db.select_namespace("new")
     assert db.namespace == "new"
     assert db.ns.name == "new"
+
+
+def test_turbopuffer_customized_case_can_disable_sdk_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def create_client(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    db = _db(SimpleNamespace())
+    db.api_key = "test-only"
+    db.region = "aws-us-east-1"
+    db.api_base_url = None
+    db.max_retries = 0
+    monkeypatch.setattr("vectordb_bench.backend.clients.turbopuffer.turbopuffer.tpuf.Turbopuffer", create_client)
+
+    db._create_client()
+
+    assert captured["max_retries"] == 0

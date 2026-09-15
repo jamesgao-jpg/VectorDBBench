@@ -5,6 +5,7 @@ import re
 import time
 import traceback
 from enum import Enum, auto
+from pathlib import Path
 
 import numpy as np
 
@@ -24,6 +25,11 @@ from .runner import (
     ReadWriteRunner,
     SerialInsertRunner,
     SerialSearchRunner,
+)
+from .turbopuffer_multitenant import (
+    MultiTenantSearchRunner,
+    MultiTenantSetupRunner,
+    PreparedMultiTenantDataset,
 )
 from .utils import kill_proc_tree
 from .workload import WorkloadKind
@@ -229,6 +235,8 @@ class CaseRunner(BaseModel):
             extra_db_kwargs["fts_filter_enabled"] = self.ca.filters.type != FilterOp.NonFilter
         if self.config.db is DB.AWSOpenSearch:
             extra_db_kwargs["insert_batch_size"] = self.config.insert_batch_size
+        if self.ca.label == CaseLabel.TurboPufferMultiTenantColdStart:
+            extra_db_kwargs["max_retries"] = 0
         collection_properties = self._collection_properties(log_selection=True)
         if collection_properties:
             extra_db_kwargs["collection_properties"] = collection_properties
@@ -251,6 +259,11 @@ class CaseRunner(BaseModel):
 
     def _pre_run(self, drop_old: bool = True):
         try:
+            if self.ca.label == CaseLabel.TurboPufferMultiTenantColdStart:
+                if self.config.db != DB.TurboPuffer:
+                    raise ValueError("TurboPufferMultiTenantColdStart supports only the TurboPuffer backend")
+                self.init_db(drop_old=False)
+                return
             self._validate_cloud_cold_latency_config(drop_old)
             requested_k = self.config.case_config.k or config.K_DEFAULT
             ground_truth_k = (
@@ -328,6 +341,8 @@ class CaseRunner(BaseModel):
             return self._run_cloud_insert_case()
         if self.ca.label == CaseLabel.CloudColdLatency:
             return self._run_cloud_cold_latency_case(drop_old)
+        if self.ca.label == CaseLabel.TurboPufferMultiTenantColdStart:
+            return self._run_turbopuffer_multitenant_case()
         msg = f"unknown case type: {self.ca.label}"
         log.warning(msg)
         raise ValueError(msg)
@@ -558,6 +573,35 @@ class CaseRunner(BaseModel):
         else:
             log.info(f"Cloud cold latency case got result: {m}")
             return m
+
+    def _run_turbopuffer_multitenant_case(self) -> Metric:
+        assert self.db is not None
+        manifest_path = Path(self.ca.manifest_path)
+        if self.ca.operation == "setup":
+            dataset = PreparedMultiTenantDataset(Path(self.ca.prepared_data))
+            summary = MultiTenantSetupRunner(
+                self.db,
+                dataset,
+                manifest_path,
+                self.ca.run_prefix,
+                dense_field=self.ca.dense_field,
+                bm25_field=self.ca.bm25_field,
+                batch_size=self.config.insert_batch_size,
+            ).run()
+            return Metric(
+                inserted_count=summary["inserted_rows"],
+                additional_parameters={"turbopuffer_multitenant": summary},
+            )
+
+        summary = MultiTenantSearchRunner(
+            self.db,
+            manifest_path,
+            self.ca.operation,
+            group=self.ca.group,
+            output_fields=self.ca.output_fields,
+            top_k=self.config.case_config.k or config.K_DEFAULT,
+        ).run()
+        return Metric(additional_parameters={"turbopuffer_multitenant": summary})
 
     @utils.time_it
     def _load_data(self):

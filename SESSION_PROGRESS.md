@@ -65,11 +65,27 @@ Assigned the task name `turbopuffer_multitenant` to local `/Users/james.gao/Desk
 Reverified the exact latest-main remote worktree: 55 focused and compatibility tests passed, and Ruff check/format passed for all changed Python files.
 - Files: `AGENTS.md` (updated, repository-local and ignored), all stage-1 implementation and design files transferred without content changes
 
+### 15. Implement the one-time 5M-row Parquet preparation
+Added a standalone script that uses the AWS credential chain, downloads source Parquets in stable object-key order until their footers cover 5M rows, validates the selected schema, finite 768-dimensional vectors, and JSON-object fields, then writes exactly 5M rows to one ZSTD-compressed Parquet file. It assigns deterministic integer IDs and renames `$meta` to `meta_json`. The script streams bounded record batches and uses partial files so failed downloads or writes do not appear complete.
+
+Verified on the assigned remote worktree with synthetic Parquet objects: it downloaded only the files needed to cover the target, trimmed the final input to the exact row count, preserved the output schema and order, renamed `$meta`, generated deterministic IDs, and rejected incorrect vector dimensions. Two focused tests passed. The CLI help command passed, and the script accepted the schema of the inspected 500,000-row source sample.
+
+Ran the preparation against private S3 using a dedicated remote credential file owned by `ubuntu` with mode `0600`. Ten source Parquets totaling 5M rows produced `/home/ubuntu/vdbbench-data-inspect/turbopuffer_multitenant_5m.parquet`. Independent verification confirmed 5,000,000 rows, 310 row groups, deterministic IDs `0..4,999,999`, the exact prepared schema, ZSTD compression for every column chunk, a 12,255,547,788-byte file, no leftover partial output, and no credential pattern in the job log.
+- Files: `scripts/prepare_turbopuffer_multitenant_data.py` (created), `tests/test_prepare_turbopuffer_multitenant_data.py` (created), `docs/turbopuffer-scaled-multitenant-design.md` (updated)
+
+### 16. Implement the VDBBench namespace setup loader
+Added optional namespace selection and existence checks to the database contract and implemented them for turbopuffer using one initialized SDK client. Added the exact A/B/C/D group definitions and a bounded prepared-Parquet reader that restarts from row zero per group, never crosses a namespace boundary in one insert call, and converts each Arrow slice into the Stage 1 `CustomizedRow` contract.
+
+The setup runner refuses untracked existing namespaces, records `started` before the first write, uses deterministic IDs for safe whole-batch upserts after partial failures, and records `completed` only after the namespace reaches its exact expected row count and its query fixture is atomically saved. A static manifest records all 4,201 names, source ranges, schema, fixture paths, and a deterministic interleaved search order; an append-only JSONL file records resumable setup checkpoints.
+
+Verified on the assigned remote worktree: 10 focused preparation/setup/client tests passed. A footer-only check against the real prepared file produced exactly 4,201 namespace specifications totaling 14,000,000 planned inserts, from `multi_tenant_1000_0001` through `multi_tenant_5m_0000001`. No live turbopuffer namespace was created.
+- Files: `vectordb_bench/backend/turbopuffer_multitenant.py` (created), `vectordb_bench/backend/clients/api.py` (updated), `vectordb_bench/backend/clients/turbopuffer/turbopuffer.py` (updated), `tests/test_turbopuffer_multitenant_setup.py` (created), `tests/test_turbopuffer_customized.py` (updated), `AGENTS.md` (updated, repository-local and ignored)
+
 ## Current Status
-The design and four implementation stages are recorded. Stage 1's customized-data contracts and turbopuffer implementation are present in matching local and remote `codex/turbopuffer_multitenant` worktrees based on latest `origin/main`. The source/data pipeline and benchmark case are not implemented, and no live turbopuffer namespace has been created.
+The design and four implementation stages are recorded. Stage 1 is committed. Stage 2's 5M-row preparation script, prepared remote artifact, namespace loader, manifest, checkpoints, and query fixtures are implemented and verified in matching local and remote `codex/turbopuffer_multitenant` worktrees. The Stage 3 benchmark case is not implemented, and no live turbopuffer namespace has been created.
 
 ## Open Issues
 - Configure a turbopuffer API key and region on the remote client before the stage-4 live pilot; keep them out of files, logs, and results.
 - Confirm with the stage-4 live pilot that the projected wide schema and deterministic IDs are accepted by turbopuffer.
-- Validate the schema and row counts of only the S3 objects consumed by the 14M-row setup.
+- Register the Stage 3 benchmark case and expose setup, dense, and BM25 invocations through the VDBBench configuration path.
 - The second pass is an after-one-query observation, not guaranteed cache residency; use the backend-reported cache state when interpreting it.

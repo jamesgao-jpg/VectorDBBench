@@ -129,3 +129,26 @@ def test_customized_rows_reject_schema_drift() -> None:
 
     with pytest.raises(ValueError, match=r"extra=\['unexpected'\]"):
         db.insert_customized_rows([row], {"content": FieldSchema("string")})
+
+
+def test_turbopuffer_selects_and_checks_customized_namespace() -> None:
+    class Namespace:
+        def __init__(self, name: str):
+            self.name = name
+
+        def exists(self) -> bool:
+            return self.name == "existing"
+
+    class Client:
+        def namespace(self, name: str) -> Namespace:
+            return Namespace(name)
+
+    db = _db(Namespace("default"))
+    db.client = Client()
+
+    assert db.supports_namespace_selection()
+    assert db.namespace_exists("existing")
+    assert not db.namespace_exists("new")
+    db.select_namespace("new")
+    assert db.namespace == "new"
+    assert db.ns.name == "new"

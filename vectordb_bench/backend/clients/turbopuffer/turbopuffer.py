@@ -215,6 +215,10 @@ class TurboPuffer(VectorDB):
     def supports_customized_api(cls) -> bool:
         return True
 
+    @classmethod
+    def supports_namespace_selection(cls) -> bool:
+        return True
+
     def has_text_field(self) -> bool:
         return bool(getattr(self, "_is_fts", False) and getattr(self, "_text_field", None))
 
@@ -244,6 +248,13 @@ class TurboPuffer(VectorDB):
             ns = self.client.namespace(name)
             self._ns_cache[name] = ns
         return ns
+
+    def namespace_exists(self, namespace: str) -> bool:
+        return self.client.namespace(namespace).exists()
+
+    def select_namespace(self, namespace: str) -> None:
+        self.namespace = namespace
+        self.ns = self.client.namespace(namespace)
 
     def optimize(self, data_size: int | None = None):
         # turbopuffer responds to the request

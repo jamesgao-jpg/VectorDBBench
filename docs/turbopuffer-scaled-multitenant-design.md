@@ -35,7 +35,7 @@ Refuse an existing run-prefix collision. Never delete existing namespaces automa
 
 ## Source data and insertion contract
 
-Read from `s3://file-transfering-bucket/widetablebenchmark/1b-clean/` in stable object-key and row order. Credentials are runtime configuration and must never be logged, saved in the manifest, or committed.
+Use a one-time standalone preparation script to read from `s3://file-transfering-bucket/widetablebenchmark/1b-clean/` in stable object-key and row order. The script downloads only enough source Parquets to produce one prepared 5M-row Parquet file. Credentials use the runtime AWS credential chain and must never be logged, saved in the output, or committed. VDBBench reads only the prepared local file and does not access private S3 during setup or measurement.
 
 The inspected `/home/ubuntu/vdbbench-data-inspect/wide_table_0000.parquet` contains 500,000 rows and uses ZSTD compression. Project only these source columns:
 
@@ -53,13 +53,24 @@ The inspected `/home/ubuntu/vdbbench-data-inspect/wide_table_0000.parquet` conta
 | `arr_str_labels` | string array |
 | `$meta` | preserve the original JSON string as `meta_json` |
 
-The source has no `pk`. Generate a deterministic turbopuffer `id` from the source object key and row offset and expose the same value as the returned `pk`. Exclude the other ten wide-table columns.
+The source has no `pk`. The preparation script assigns deterministic integer IDs from `0` through `4,999,999` in stable source order. Exclude the other ten wide-table columns.
 
-Validate the projected schema, 768-dimensional finite vectors, JSON-object fields, and row counts for only the source objects consumed by this 14M-row setup. Fail on schema drift. Deterministic IDs make resumed writes idempotent.
+Validate the projected schema, 768-dimensional finite vectors, JSON-object fields, and row counts for only the source objects needed to produce 5M rows. Fail on schema drift. Write ZSTD-compressed row groups so the prepared file remains streamable with bounded memory.
 
 The inspected `$meta` column is a required Arrow string. All 500,000 rows parse as JSON objects; their values use five stable keys (`dyn_extra_a`, `dyn_extra_b`, `dyn_extra_c`, `dyn_source`, and `dyn_version`) with string values. Turbopuffer attribute names cannot start with `$`, and its documented schema has no general JSON-object type. Preserve the source string unchanged in a non-filterable `meta_json` string attribute and record the `$meta` → `meta_json` mapping in the manifest. Do not expand the keys, because expansion would change one source field into five nullable fields. [Turbopuffer attributes](https://turbopuffer.com/docs/write#attributes).
 
-Write a small manifest containing the run prefix, namespace names, group, expected row counts, source ranges, schema version, and completion state. The manifest supports search-only reuse and prevents accidental collision; it does not need cold-pool allocation or byte-budget accounting.
+During setup, reuse the prepared file from the beginning for each group: A, B, and C each consume the first 3M rows, while D consumes all 5M rows. This creates the required 14M inserted rows from 5M prepared rows and gives A-C a common data population for size comparisons. Write a static manifest containing the run prefix, namespace names, group, expected row counts, prepared-file ranges, schema version, fixture paths, and deterministic search order. Record `started` and `completed` events in an append-only checkpoint file, and write each namespace's dense vector and BM25 text fixture to its own atomic JSON file.
+
+Prepare the file on the remote client after configuring its standard AWS credential chain:
+
+```bash
+AWS_SHARED_CREDENTIALS_FILE=/home/ubuntu/.aws/vdbbench-turbopuffer-multitenant \
+  /home/ubuntu/VectorDBBench/.venv/bin/python scripts/prepare_turbopuffer_multitenant_data.py \
+  --download-dir /home/ubuntu/vdbbench-data-inspect/turbopuffer-source \
+  --output /home/ubuntu/vdbbench-data-inspect/turbopuffer_multitenant_5m.parquet
+```
+
+Successful output is a JSON summary with `output_rows` equal to `5000000`. The command refuses to replace an existing output file.
 
 ## One benchmark case
 
@@ -92,10 +103,9 @@ Rerunning a true cold pass requires a new namespace prefix. Search-only reruns a
 
 ### Wide source and schema
 
-- Add a wide-table dataset definition that projects the eleven selected Parquet columns instead of representing a dataset as only ID, vector, and optional label.
-- Add a streaming iterator that preserves the projected Arrow types and does not materialize the 14M rows in memory.
-- Add authenticated access to the private S3 prefix using runtime environment credentials. The current anonymous public-dataset S3 reader cannot access this source. Never put credentials in case configuration, manifests, logs, or results.
-- Validate the schema and row count of every consumed source object before inserting from it. Check vector dimension and finiteness, JSON-object shape, nullable fields, arrays, and dynamic-field types.
+- Add a one-time standalone preparation script that uses the AWS credential chain, downloads enough source Parquets for 5M rows, projects and validates the eleven selected fields, assigns deterministic IDs, renames `$meta`, and writes one prepared Parquet file.
+- Add a VDBBench streaming iterator for that prepared file. It must preserve the projected Arrow types and must not materialize the 5M rows in memory.
+- Reuse the prepared file for each namespace group: read 3M rows for each of A-C and all 5M rows for D.
 - Add deterministic row-to-namespace slicing for the A/B/C/D counts. The existing `row_id % tenant_count` distribution cannot produce different namespace sizes.
 - Save one deterministic dense query vector and one deterministic BM25 query string for every namespace in a small query-fixture artifact referenced by the manifest.
 

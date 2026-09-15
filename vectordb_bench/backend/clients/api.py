@@ -303,6 +303,18 @@ class VectorDB(ABC):
     def supports_customized_api(cls) -> bool:
         return False
 
+    @classmethod
+    def supports_namespace_selection(cls) -> bool:
+        return False
+
+    def namespace_exists(self, namespace: str) -> bool:
+        msg = f"{self.name or self.__class__.__name__} does not support namespace selection"
+        raise NotImplementedError(msg)
+
+    def select_namespace(self, namespace: str) -> None:
+        msg = f"{self.name or self.__class__.__name__} does not support namespace selection"
+        raise NotImplementedError(msg)
+
     def insert_customized_rows(
         self,
         rows: Sequence[CustomizedRow],

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from enum import StrEnum
@@ -6,6 +7,12 @@ from typing import ClassVar
 
 from pydantic import BaseModel, model_validator
 
+from vectordb_bench.backend.customized import (
+    CustomizedRequest,
+    CustomizedRow,
+    FieldSchema,
+    SearchResult,
+)
 from vectordb_bench.backend.filter import Filter, FilterOp
 from vectordb_bench.backend.payload import PayloadProfile
 
@@ -291,6 +298,25 @@ class VectorDB(ABC):
         search_documents for raw text documents.
         """
         return False
+
+    @classmethod
+    def supports_customized_api(cls) -> bool:
+        return False
+
+    def insert_customized_rows(
+        self,
+        rows: Sequence[CustomizedRow],
+        schema: Mapping[str, FieldSchema],
+    ) -> tuple[int, Exception | None]:
+        msg = f"{self.name or self.__class__.__name__} does not support customized row insert"
+        raise NotImplementedError(msg)
+
+    def search_customized_queries(
+        self,
+        requests: Sequence[CustomizedRequest],
+    ) -> list[SearchResult]:
+        msg = f"{self.name or self.__class__.__name__} does not support customized queries"
+        raise NotImplementedError(msg)
 
     def insert_documents(
         self,

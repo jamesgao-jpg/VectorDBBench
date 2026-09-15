@@ -3,6 +3,7 @@
 import logging
 import os
 import time
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from json import dumps, loads
 from typing import Any
@@ -16,6 +17,14 @@ from vectordb_bench.backend.clients.turbopuffer.config import (
     TurboPufferFtsConfig,
     TurboPufferIndexConfig,
     TurboPufferMultitenantWarmupPolicy,
+)
+from vectordb_bench.backend.customized import (
+    CustomizedRequest,
+    CustomizedRow,
+    FieldSchema,
+    SearchPerformance,
+    SearchResult,
+    validate_customized_rows,
 )
 from vectordb_bench.backend.filter import Filter, FilterOp
 from vectordb_bench.backend.payload import PayloadProfile
@@ -202,6 +211,10 @@ class TurboPuffer(VectorDB):
     def supports_full_text_search(cls) -> bool:
         return True
 
+    @classmethod
+    def supports_customized_api(cls) -> bool:
+        return True
+
     def has_text_field(self) -> bool:
         return bool(getattr(self, "_is_fts", False) and getattr(self, "_text_field", None))
 
@@ -331,6 +344,69 @@ class TurboPuffer(VectorDB):
         return len(embeddings), None
 
     @staticmethod
+    def _customized_schema(schema: Mapping[str, FieldSchema]) -> tuple[dict[str, dict], str | None]:
+        type_map = {
+            "int": "int",
+            "float": "float",
+            "bool": "bool",
+            "string": "string",
+            "string[]": "[]string",
+        }
+        result = {}
+        metrics = set()
+        for name, field in schema.items():
+            if name.startswith("$"):
+                msg = f"turbopuffer field names must not start with '$': {name}"
+                raise ValueError(msg)
+            if field.data_type == "vector":
+                config = {"type": f"[{field.dimensions}]f32", "ann": True}
+                if field.metric is not None:
+                    metrics.add({"cosine": "cosine_distance"}[field.metric])
+            else:
+                config = {"type": type_map[field.data_type]}
+            if field.full_text_search:
+                config["full_text_search"] = True
+            if field.filterable is not None:
+                config["filterable"] = field.filterable
+            result[name] = config
+        if len(metrics) > 1:
+            raise ValueError("turbopuffer customized vectors must use one distance metric")
+        return result, next(iter(metrics), None)
+
+    def insert_customized_rows(
+        self,
+        rows: Sequence[CustomizedRow],
+        schema: Mapping[str, FieldSchema],
+    ) -> tuple[int, Exception | None]:
+        assert self.ns is not None, "should self.init() first"
+        validate_customized_rows(rows, schema)
+        if not rows:
+            return 0, None
+
+        tpuf_schema, schema_metric = self._customized_schema(schema)
+        upsert_columns = {self._scalar_id_field: [row.id for row in rows]}
+        for name in schema:
+            upsert_columns[name] = [
+                value.tolist() if hasattr(value := row.fields[name], "tolist") else value for row in rows
+            ]
+        write_kwargs = {
+            "upsert_columns": upsert_columns,
+            "schema": tpuf_schema,
+            "disable_backpressure": self.db_case_config.disable_backpressure,
+        }
+        metric = schema_metric or self.metric
+        if any(field.data_type == "vector" for field in schema.values()):
+            if metric is None:
+                raise ValueError("turbopuffer customized vector fields require a distance metric")
+            write_kwargs["distance_metric"] = metric
+        try:
+            self.ns.write(**write_kwargs)
+        except Exception as e:
+            log.warning(f"Failed to insert customized rows. Error: {e}")
+            return 0, e
+        return len(rows), None
+
+    @staticmethod
     def supports_payload_profile(payload_profile: PayloadProfile) -> bool:
         return payload_profile in {
             PayloadProfile.IDS_ONLY,
@@ -423,6 +499,63 @@ class TurboPuffer(VectorDB):
             return 0, e
         return len(docs), None
 
+    @staticmethod
+    def _object_dict(value: Any) -> dict:
+        if value is None:
+            return {}
+        if isinstance(value, Mapping):
+            return dict(value)
+        if hasattr(value, "model_dump"):
+            return value.model_dump(by_alias=True)
+        return vars(value)
+
+    @classmethod
+    def _search_performance(cls, response: Any) -> SearchPerformance:
+        performance = cls._object_dict(getattr(response, "performance", None))
+
+        def number(name: str) -> float | None:
+            value = performance.get(name)
+            return None if value is None else float(value)
+
+        temperature = performance.get("cache_temperature")
+        return SearchPerformance(
+            cache_hit_ratio=number("cache_hit_ratio"),
+            cache_temperature=None if temperature is None else str(temperature),
+            server_total_ms=number("server_total_ms"),
+            query_execution_ms=number("query_execution_ms"),
+        )
+
+    def _search_customized_query(
+        self,
+        request: CustomizedRequest,
+        tenant: str | None = None,
+    ) -> SearchResult:
+        value = request.value.tolist() if hasattr(request.value, "tolist") else request.value
+        operation = "ANN" if request.mode == "dense" else "BM25"
+        query_kwargs = {
+            "rank_by": (request.field, operation, value),
+            "top_k": request.top_k,
+        }
+        if self.expr is not None:
+            query_kwargs["filters"] = self.expr
+        if request.include_fields:
+            query_kwargs["include_attributes"] = list(request.include_fields)
+
+        namespace = self.ns if tenant is None else self._namespace_for_tenant(tenant)
+        response = namespace.query(**query_kwargs)
+        rows = getattr(response, "rows", None) or []
+        row_dicts = [self._object_dict(row) for row in rows]
+        ids = [row.get("id") for row in row_dicts if row.get("id") is not None]
+        fields = {name: [row.get(name) for row in row_dicts] for name in request.include_fields}
+        return SearchResult(ids=ids, fields=fields, performance=self._search_performance(response))
+
+    def search_customized_queries(
+        self,
+        requests: Sequence[CustomizedRequest],
+    ) -> list[SearchResult]:
+        assert self.ns is not None, "should self.init() first"
+        return [self._search_customized_query(request) for request in requests]
+
     def search_embedding(
         self,
         query: list[float],
@@ -431,17 +564,14 @@ class TurboPuffer(VectorDB):
         payload_profile: PayloadProfile = PayloadProfile.IDS_ONLY,
         tenant: str | None = None,
     ) -> list[int]:
-        query_kwargs = {
-            "rank_by": ("vector", "ANN", query),
-            "top_k": k,
-            "filters": self.expr,
-        }
+        include_fields = ()
         if payload_profile == PayloadProfile.VECTOR:
-            query_kwargs["include_attributes"] = [self._vector_field]
+            include_fields = (self._vector_field,)
         elif payload_profile == PayloadProfile.SCALAR_LABEL:
-            query_kwargs["include_attributes"] = [self._scalar_payload_label_field]
-        res = self._namespace_for_tenant(tenant).query(**query_kwargs)
-        return [int(row.id) for row in res.rows] if res.rows is not None else []
+            include_fields = (self._scalar_payload_label_field,)
+        request = CustomizedRequest("dense", self._vector_field, query, k, include_fields)
+        result = self._search_customized_query(request, tenant)
+        return [int(row_id) for row_id in result.ids]
 
     def search_documents(
         self,
@@ -450,7 +580,8 @@ class TurboPuffer(VectorDB):
         payload_profile: PayloadProfile = PayloadProfile.IDS_ONLY,
         **kwargs,
     ) -> list[str]:
-        if not getattr(self, "_is_fts", False):
+        field_name = kwargs.get("field_name")
+        if not getattr(self, "_is_fts", False) and field_name is None:
             msg = "TurboPuffer full-text search requires TurboPufferFtsConfig"
             raise RuntimeError(msg)
         if not self.supports_document_payload_profile(payload_profile):
@@ -458,17 +589,13 @@ class TurboPuffer(VectorDB):
             raise NotImplementedError(msg)
         assert self.ns is not None, "should self.init() first"
 
-        query_kwargs = {
-            "rank_by": (self._text_field, "BM25", query),
-            "top_k": k,
-        }
-        if self.expr is not None:
-            query_kwargs["filters"] = self.expr
+        text_field = field_name or self._text_field
+        include_fields = ()
         if payload_profile == PayloadProfile.TEXT:
-            query_kwargs["include_attributes"] = [self._text_field]
-        res = self.ns.query(**query_kwargs)
-        rows = getattr(res, "rows", None) or []
-        return [str(row.id) for row in rows if getattr(row, "id", None) is not None]
+            include_fields = (text_field,)
+        request = CustomizedRequest("bm25", text_field, query, k, include_fields)
+        result = self._search_customized_query(request)
+        return [str(row_id) for row_id in result.ids]
 
     def prepare_filter(self, filters: Filter):
         if filters.type == FilterOp.NonFilter:

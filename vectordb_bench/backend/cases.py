@@ -766,6 +766,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
     run_prefix: str | None = None
     dense_field: str = "emb_768"
     bm25_field: str = "content"
+    profile: str | None = None
     group: str = "all"
     output_fields: tuple[str, ...] = ()
 
@@ -777,6 +778,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
         run_prefix: str | None = None,
         dense_field: str = "emb_768",
         bm25_field: str = "content",
+        profile: str | None = None,
         group: str = "all",
         output_fields: tuple[str, ...] | list[str] = (),
         **kwargs,
@@ -790,6 +792,12 @@ class TurboPufferMultiTenantColdStartCase(Case):
             raise ValueError("manifest_path is required")
         if operation == "setup" and (not prepared_data or not run_prefix):
             raise ValueError("setup requires prepared_data and run_prefix")
+        if operation == "setup":
+            profile = profile or "medium"
+            if profile not in {"small", "medium", "large"}:
+                raise ValueError("profile must be small, medium, or large")
+        elif profile is not None:
+            raise ValueError("profile applies only to the setup operation")
         if group not in {"all", "A", "B", "C", "D"}:
             raise ValueError("group must be all, A, B, C, or D")
         if operation == "setup" and group != "all":
@@ -800,10 +808,9 @@ class TurboPufferMultiTenantColdStartCase(Case):
             raise ValueError("output_fields must be unique and must not contain id")
 
         data_path = Path(prepared_data or manifest_path)
-        total_rows = {"all": 14_000_000, "A": 3_000_000, "B": 3_000_000, "C": 3_000_000, "D": 5_000_000}
         dataset = CustomDataset(
-            name="TurbopufferMultiTenant",
-            size=total_rows[group],
+            name="TurbopufferMultiTenantSource",
+            size=5_000_000,
             dim=768,
             metric_type=MetricType.COSINE,
             use_shuffled=False,
@@ -822,6 +829,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
             run_prefix=run_prefix,
             dense_field=dense_field,
             bm25_field=bm25_field,
+            profile=profile,
             group=group,
             output_fields=output_fields,
             **kwargs,

@@ -197,6 +197,16 @@ class TurboPufferTypedDict(TypedDict):
             help="Full-text field indexed and recorded in the setup manifest",
         ),
     ]
+    multitenant_profile: Annotated[
+        str,
+        click.option(
+            "--multitenant-profile",
+            type=click.Choice(["small", "medium", "large"]),
+            default="medium",
+            show_default=True,
+            help="Namespace-count profile used by the setup operation",
+        ),
+    ]
     multitenant_group: Annotated[
         str,
         click.option(

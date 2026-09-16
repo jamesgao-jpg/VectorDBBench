@@ -48,6 +48,7 @@ def _write_manifest(tmp_path: Path) -> Path:
         json.dumps(
             {
                 "version": MANIFEST_VERSION,
+                "profile": "custom",
                 "schema": {name: asdict(field) for name, field in customized_schema("emb_768", "content").items()},
                 "search_fields": {"dense": "emb_768", "bm25": "content"},
                 "namespaces": namespaces,
@@ -127,6 +128,8 @@ def test_multitenant_search_runs_first_and_repeat_in_manifest_order(tmp_path: Pa
     ]
     assert all(call.top_k == 10 and call.include_fields == ("vc_uuid",) for _, call in db.calls)
     assert summary["status"] == "complete"
+    assert summary["profile"] == "custom"
+    assert summary["total_rows"] == 4
     assert summary["groups"]["A"]["first"]["count"] == 2
     assert summary["groups"]["A"]["repeat"]["count"] == 2
     assert summary["groups"]["B"]["first"]["count"] == 1
@@ -244,7 +247,8 @@ def test_multitenant_case_and_cli_config() -> None:
     assert case.operation == "dense"
     assert case.group == "C"
     assert case.output_fields == ("vc_uuid", "vc_tag")
-    assert case.dataset.data.size == 3_000_000
+    assert case.dataset.data.name == "TurbopufferMultiTenantSource"
+    assert case.dataset.data.size == 5_000_000
 
 
 def test_multitenant_setup_cli_requires_data_and_prefix() -> None:
@@ -259,8 +263,11 @@ def test_multitenant_setup_cli_requires_data_and_prefix() -> None:
             "multitenant_run_prefix": None,
             "multitenant_dense_field": "emb_768",
             "multitenant_bm25_field": "content",
+            "multitenant_profile": "small",
         }
     )
+
+    assert custom_case["profile"] == "small"
 
     with pytest.raises(ValueError, match="setup requires prepared_data and run_prefix"):
         CaseConfig(case_id=CaseType.TurboPufferMultiTenantColdStart, custom_case=custom_case).case

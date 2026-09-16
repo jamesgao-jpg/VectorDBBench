@@ -232,6 +232,7 @@ def get_custom_case_config(parameters: dict) -> dict:
                     "run_prefix": parameters.get("multitenant_run_prefix"),
                     "dense_field": parameters.get("multitenant_dense_field", "emb_768"),
                     "bm25_field": parameters.get("multitenant_bm25_field", "content"),
+                    "profile": parameters.get("multitenant_profile", "medium"),
                 }
             )
         return custom_case_config

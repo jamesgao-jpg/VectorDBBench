@@ -7,10 +7,13 @@ import pyarrow.parquet as pq
 import pytest
 
 from vectordb_bench.backend.turbopuffer_multitenant import (
+    NAMESPACE_PROFILE_COUNTS,
     PREPARED_SCHEMA,
     MultiTenantSetupRunner,
     NamespaceGroup,
     PreparedMultiTenantDataset,
+    namespace_groups,
+    namespace_profile,
 )
 
 
@@ -96,6 +99,21 @@ def _groups() -> tuple[NamespaceGroup, ...]:
     )
 
 
+def test_namespace_profiles_keep_row_shapes_and_bound_source_rows() -> None:
+    expected_counts = {"small": 20, "medium": 100, "large": 300}
+
+    assert NAMESPACE_PROFILE_COUNTS == expected_counts
+    for profile, count in expected_counts.items():
+        groups = namespace_groups(profile)
+        assert [group.rows_per_namespace for group in groups] == [1_000, 3_000, 15_000, 5_000_000]
+        assert [group.namespace_count for group in groups] == [count, count, count, 1]
+        assert max(group.source_rows for group in groups) <= 5_000_000
+        assert namespace_profile(groups) == profile
+
+    with pytest.raises(ValueError, match="small, medium, or large"):
+        namespace_groups("unknown")
+
+
 def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
     _write_prepared(prepared)
@@ -107,12 +125,15 @@ def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path:
     summary = runner.run()
 
     assert summary["inserted_rows"] == 8
+    assert summary["profile"] == "custom"
+    assert summary["total_rows"] == 8
     assert summary["completed_namespaces"] == 3
     assert list(db.rows["run_2_01"]) == [0, 1]
     assert list(db.rows["run_2_02"]) == [2, 3]
     assert list(db.rows["run_4_01"]) == [0, 1, 2, 3]
     manifest_data = json.loads(manifest.read_text())
     assert len(manifest_data["namespaces"]) == 3
+    assert manifest_data["profile"] == "custom"
     assert manifest_data["search_fields"] == {"dense": "emb_768", "bm25": "content"}
     assert sorted(manifest_data["search_order"]) == ["run_2_01", "run_2_02", "run_4_01"]
     fixture = json.loads((tmp_path / "setup.fixtures/run_2_02.json").read_text())

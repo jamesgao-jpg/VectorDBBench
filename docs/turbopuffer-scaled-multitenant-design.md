@@ -12,23 +12,21 @@ This is a focused turbopuffer experiment. It does not reproduce the original Mil
 
 ## Namespace setup
 
-Keep the original per-namespace sizes and reduce only the namespace counts:
+Keep the original per-namespace sizes and use equal sample counts for A-C. Equal counts compare latency by namespace size without recreating the original fleet population:
 
-| Group | Rows per namespace | Namespace count | Total rows |
-| --- | ---: | ---: | ---: |
-| A | 1,000 | 3,000 | 3M |
-| B | 3,000 | 1,000 | 3M |
-| C | 15,000 | 200 | 3M |
-| D | 5M | 1 | 5M |
-| **Total** |  | **4,201** | **14M** |
+| Profile | A namespaces | B namespaces | C namespaces | D namespaces | Total namespaces | Total rows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Small | 20 | 20 | 20 | 1 | 61 | 5.38M |
+| Medium | 100 | 100 | 100 | 1 | 301 | 6.9M |
+| Large | 300 | 300 | 300 | 1 | 901 | 10.7M |
 
-At the Milvus document's approximate 4.8 KB per row, this is about 67.2 GB. The selected columns in the inspected Parquet sample occupy about 3.96 KB of uncompressed column storage per row, or about 55.4 GB for 14M rows. Both are far below the 1 TB limit, so runtime size-based stopping and small/medium/large scale profiles are unnecessary.
+Medium is the default. Small is a functional and variance-estimation pilot. Large is reserved for cases where Medium's confidence intervals are too wide. P99 remains descriptive because even Large has only about three observations in its top percentile.
 
-Use one unique run prefix and these suffix ranges:
+Use one unique run prefix. Namespace names retain the same row-size suffixes and stable numeric widths:
 
-- `multi_tenant_1000_0001` through `multi_tenant_1000_3000`
-- `multi_tenant_3000_0001` through `multi_tenant_3000_1000`
-- `multi_tenant_15000_001` through `multi_tenant_15000_200`
+- `multi_tenant_1000_0001` onward for A
+- `multi_tenant_3000_0001` onward for B
+- `multi_tenant_15000_001` onward for C
 - `multi_tenant_5m_0000001`
 
 Refuse an existing run-prefix collision. Never delete existing namespaces automatically.
@@ -59,7 +57,7 @@ Validate the projected schema, 768-dimensional finite vectors, JSON-object field
 
 The inspected `$meta` column is a required Arrow string. All 500,000 rows parse as JSON objects; their values use five stable keys (`dyn_extra_a`, `dyn_extra_b`, `dyn_extra_c`, `dyn_source`, and `dyn_version`) with string values. Turbopuffer attribute names cannot start with `$`, and its documented schema has no general JSON-object type. Preserve the source string unchanged in a non-filterable `meta_json` string attribute and record the `$meta` → `meta_json` mapping in the manifest. Do not expand the keys, because expansion would change one source field into five nullable fields. [Turbopuffer attributes](https://turbopuffer.com/docs/write#attributes).
 
-During setup, reuse the prepared file from the beginning for each group: A, B, and C each consume the first 3M rows, while D consumes all 5M rows. This creates the required 14M inserted rows from 5M prepared rows and gives A-C a common data population for size comparisons. Write a static manifest containing the run prefix, namespace names, group, expected row counts, prepared-file ranges, schema version, fixture paths, and deterministic search order. Record `started` and `completed` events in an append-only checkpoint file, and write each namespace's dense vector and BM25 text fixture to its own atomic JSON file.
+During setup, reuse the prepared file from the beginning for each group. For a profile count `N`, A consumes `N × 1K` rows, B consumes `N × 3K`, C consumes `N × 15K`, and D consumes all 5M rows. Large therefore needs at most 4.5M source rows for C, so the existing prepared file covers every profile. Write a static manifest containing the profile, run prefix, namespace names, group, expected row counts, prepared-file ranges, schema version, fixture paths, and deterministic search order. Record `started` and `completed` events in an append-only checkpoint file, and write each namespace's dense vector and BM25 text fixture to its own atomic JSON file.
 
 Prepare the file on the remote client after configuring its standard AWS credential chain:
 
@@ -76,7 +74,7 @@ Successful output is a JSON summary with `output_rows` equal to `5000000`. The c
 
 Register one case type: `TurboPufferMultiTenantColdStart`. Separate invocations select `setup`, `dense`, or `bm25`. Hybrid search and explicit sparse-vector `SparseKNN` are outside the first version.
 
-The setup operation loads all 4,201 namespaces without issuing search queries. Dense and BM25 operations use the completed setup manifest and query the selected distribution (`all`, `A`, `B`, `C`, or `D`) sequentially. Each namespace uses exactly one saved query fixture:
+The setup operation loads the selected profile without issuing search queries. Dense and BM25 operations use the completed setup manifest and query the selected distribution (`all`, `A`, `B`, `C`, or `D`) sequentially. Each namespace uses exactly one saved query fixture:
 
 1. Bind a turbopuffer client to one namespace from the manifest.
 2. Run one first query and retain it as that namespace's cold sample.
@@ -117,6 +115,7 @@ PYTHONPATH=/home/ubuntu/VectorDBBench-stage1-test \
   --multitenant-operation setup \
   --multitenant-manifest /home/ubuntu/vdbbench-data-inspect/dense-setup.json \
   --multitenant-prepared-data /home/ubuntu/vdbbench-data-inspect/turbopuffer_multitenant_5m.parquet \
+  --multitenant-profile medium \
   --multitenant-run-prefix multi_tenant_dense
 ```
 
@@ -134,13 +133,15 @@ PYTHONPATH=/home/ubuntu/VectorDBBench-stage1-test \
 
 BM25 requires a separately prepared namespace prefix and manifest if its first pass is to be described as cold. Replace `dense` with `bm25` and optionally add `--multitenant-output-fields vc_uuid,vc_tag`. Setup always creates all four distributions; `--multitenant-group` controls only the search runtime.
 
+See the [run README](turbopuffer-multitenant/README.md) for complete commands, artifact names, resume behavior, and result interpretation.
+
 ## Supporting implementation status before a live test
 
 ### Wide source and schema
 
 - Implemented a one-time standalone preparation script that uses the AWS credential chain, downloads enough source Parquets for 5M rows, projects and validates the eleven selected fields, assigns deterministic IDs, renames `$meta`, and writes one prepared Parquet file.
 - Implemented a bounded VDBBench streaming iterator for that prepared file.
-- Reuse the prepared file for each namespace group: read 3M rows for each of A-C and all 5M rows for D.
+- Reuse the prepared file from row zero for each namespace group according to the selected profile.
 - Implemented deterministic row-to-namespace slicing for the A/B/C/D counts.
 - Save one deterministic dense query vector and one deterministic BM25 query string for every namespace in an atomic query-fixture artifact referenced by the manifest.
 
@@ -235,7 +236,7 @@ The wide case can use the existing `TurboPufferIndexConfig` with cosine distance
 
 The insertion pipeline streams bounded lists of `CustomizedRow`. The namespace slicer consumes rows in deterministic source order, closes a write batch at its configured row limit without crossing a namespace boundary, binds a turbopuffer client to that namespace, and calls `insert_customized_rows()`. The setup checkpoint advances only after every expected row has been acknowledged and the namespace query fixture has been saved atomically.
 
-The search pipeline reconstructs one `CustomizedRequest` from each namespace's saved fixture, calls `search_customized_queries([request])` once for the cold sample and once for the repeat sample, and immediately appends each result to the JSONL result artifact. Aggregation consumes that artifact, so resume and reporting do not require keeping all 4,201 namespace results in memory.
+The search pipeline reconstructs one `CustomizedRequest` from each namespace's saved fixture, calls `search_customized_queries([request])` once for the first sample and once for the repeat sample, and immediately appends each result to the JSONL result artifact. Aggregation consumes that artifact, so resume and reporting do not require keeping all namespace results in memory.
 
 Do not create a generic backend schema language beyond the six field kinds needed by the inspected file. Do not expose arbitrary turbopuffer query dictionaries. If another backend later implements this capability, it maps these same narrow contracts or reports the capability as unsupported.
 
@@ -262,6 +263,6 @@ Do not create a generic backend schema language beyond the six field kinds neede
 - Add deterministic unit tests for wide Parquet projection, namespace slicing, schema conversion, dense/BM25 dispatch, response metadata, aggregation, failure recording, and resume behavior.
 - Run focused VDBBench tests on the designated remote client according to `AGENTS.md`.
 - Run a disposable pilot with a few tiny namespaces to verify the actual turbopuffer schema, field returns, BM25 query behavior, query metadata, and first/repeat classification.
-- Inspect the pilot artifact and confirm that no credentials or full row payloads appear in logs or results before loading the 14M-row setup.
+- Inspect the pilot artifact and confirm that no credentials or full row payloads appear in logs or results before loading Medium or Large.
 
-No scale flag, fixed-QPS scheduler, max-QPS ramp, hybrid/RRF query, explicit sparse-vector field, eviction emulation, D/E replicas, or aggregate 1 TB guard is part of this implementation.
+No adaptive stopping, fixed-QPS scheduler, max-QPS ramp, hybrid/RRF query, explicit sparse-vector field, eviction emulation, D/E replicas, or aggregate 1 TB guard is part of this implementation.

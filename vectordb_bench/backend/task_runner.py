@@ -30,6 +30,7 @@ from .turbopuffer_multitenant import (
     MultiTenantSearchRunner,
     MultiTenantSetupRunner,
     PreparedMultiTenantDataset,
+    namespace_groups,
 )
 from .utils import kill_proc_tree
 from .workload import WorkloadKind
@@ -578,7 +579,10 @@ class CaseRunner(BaseModel):
         assert self.db is not None
         manifest_path = Path(self.ca.manifest_path)
         if self.ca.operation == "setup":
-            dataset = PreparedMultiTenantDataset(Path(self.ca.prepared_data))
+            dataset = PreparedMultiTenantDataset(
+                Path(self.ca.prepared_data),
+                namespace_groups(self.ca.profile),
+            )
             summary = MultiTenantSetupRunner(
                 self.db,
                 dataset,

@@ -25,25 +25,31 @@ from vectordb_bench.metric import Metric
 from vectordb_bench.models import CaseConfig, CaseResult, TaskConfig, TestResult
 
 
+TEST_QUERIES = [
+    {"index": 0, "dense": [1.0] * 768, "bm25": "query-0"},
+    {"index": 1, "dense": [2.0] * 768, "bm25": "query-1"},
+]
+
+
 def _write_manifest(tmp_path: Path) -> Path:
     manifest = tmp_path / "setup.json"
-    fixture_dir = tmp_path / "setup.fixtures"
-    fixture_dir.mkdir()
     namespaces = [
-        {"name": "run_1_01", "group": "A", "rows": 1, "fixture": "setup.fixtures/run_1_01.json"},
-        {"name": "run_2_01", "group": "B", "rows": 2, "fixture": "setup.fixtures/run_2_01.json"},
-        {"name": "run_1_02", "group": "A", "rows": 1, "fixture": "setup.fixtures/run_1_02.json"},
+        {"name": "run_1_01", "group": "A", "rows": 1, "source_start": 0, "source_end": 1},
+        {"name": "run_2_01", "group": "B", "rows": 2, "source_start": 0, "source_end": 2},
+        {"name": "run_1_02", "group": "A", "rows": 1, "source_start": 1, "source_end": 2},
     ]
-    for index, entry in enumerate(namespaces):
-        (tmp_path / entry["fixture"]).write_text(
-            json.dumps(
-                {
-                    "namespace": entry["name"],
-                    "dense": {"field": "emb_768", "value": [float(index)] * 768},
-                    "bm25": {"field": "content", "value": f"query-{entry['name']}"},
-                }
-            )
+    (tmp_path / "setup.queries.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "count": len(TEST_QUERIES),
+                "dense_field": "emb_768",
+                "bm25_field": "content",
+                "queries": TEST_QUERIES,
+            },
+            separators=(",", ":"),
         )
+    )
     manifest.write_text(
         json.dumps(
             {
@@ -51,6 +57,8 @@ def _write_manifest(tmp_path: Path) -> Path:
                 "profile": "custom",
                 "schema": {name: asdict(field) for name, field in customized_schema("emb_768", "content").items()},
                 "search_fields": {"dense": "emb_768", "bm25": "content"},
+                "queries_file": "setup.queries.json",
+                "query_count": len(TEST_QUERIES),
                 "namespaces": namespaces,
                 "search_order": ["run_1_01", "run_2_01", "run_1_02"],
                 "checkpoint_file": "setup.checkpoints.jsonl",
@@ -121,22 +129,35 @@ def test_multitenant_search_runs_first_and_repeat_in_manifest_order(tmp_path: Pa
     assert [namespace for namespace, _ in db.calls] == [
         "run_1_01",
         "run_1_01",
+        "run_1_01",
+        "run_1_01",
         "run_2_01",
         "run_2_01",
+        "run_2_01",
+        "run_2_01",
+        "run_1_02",
+        "run_1_02",
         "run_1_02",
         "run_1_02",
     ]
     assert all(call.top_k == 10 and call.include_fields == ("vc_uuid",) for _, call in db.calls)
     assert summary["status"] == "complete"
     assert summary["profile"] == "custom"
+    assert summary["query_count"] == 2
     assert summary["total_rows"] == 4
-    assert summary["groups"]["A"]["first"]["count"] == 2
-    assert summary["groups"]["A"]["repeat"]["count"] == 2
-    assert summary["groups"]["B"]["first"]["count"] == 1
-    assert summary["groups"]["A"]["first"]["server_total_ms"]["average_ms"] == 12
-    assert summary["groups"]["A"]["first"]["query_execution_ms"]["average_ms"] == 9
+    assert summary["groups"]["A"]["cold"]["count"] == 2
+    assert summary["groups"]["A"]["first"]["count"] == 4
+    assert summary["groups"]["A"]["repeat"]["count"] == 4
+    assert summary["groups"]["B"]["cold"]["count"] == 1
+    assert summary["groups"]["B"]["first"]["count"] == 2
+    assert summary["groups"]["B"]["repeat"]["count"] == 2
+    assert summary["groups"]["A"]["cold"]["server_total_ms"]["average_ms"] == 12
+    assert summary["groups"]["A"]["cold"]["query_execution_ms"]["average_ms"] == 9
+    assert "min_ms" in summary["groups"]["A"]["first"]
+    assert "max_ms" in summary["groups"]["A"]["first"]
+    assert "p99_ms" in summary["groups"]["A"]["repeat"]
     event_text = Path(summary["event_path"]).read_text()
-    assert "query-run" not in event_text
+    assert "query-0" not in event_text
     assert '"cache_hit_ratio":0.25' in event_text
 
 
@@ -146,8 +167,8 @@ def test_multitenant_search_can_select_one_distribution(tmp_path: Path) -> None:
 
     summary = MultiTenantSearchRunner(db, manifest, "bm25", group="B").run()
 
-    assert [namespace for namespace, _ in db.calls] == ["run_2_01", "run_2_01"]
-    assert db.calls[0][1].field == "content"
+    assert [namespace for namespace, _ in db.calls] == ["run_2_01", "run_2_01", "run_2_01", "run_2_01"]
+    assert all(call.field == "content" for _, call in db.calls)
     assert summary["group"] == "B"
     assert set(summary["groups"]) == {"B"}
 
@@ -160,10 +181,11 @@ def test_multitenant_search_does_not_retry_and_preserves_failure_summary(tmp_pat
     with pytest.raises(MultiTenantSearchIncomplete) as failure:
         runner.run()
 
-    assert [namespace for namespace, _ in db.calls].count("run_1_01") == 1
-    assert [namespace for namespace, _ in db.calls].count("run_2_01") == 2
+    assert [namespace for namespace, _ in db.calls].count("run_1_01") == 2
+    assert [namespace for namespace, _ in db.calls].count("run_2_01") == 4
     assert failure.value.summary["status"] == "incomplete"
-    assert failure.value.summary["groups"]["A"]["first"]["outcomes"]["error"] == 1
+    assert failure.value.summary["groups"]["A"]["cold"]["outcomes"]["error"] == 1
+    assert failure.value.summary["groups"]["A"]["repeat"]["outcomes"]["skipped"] == 2
     assert Path(failure.value.summary["summary_path"]).is_file()
 
 
@@ -179,20 +201,21 @@ def test_multitenant_search_marks_interrupted_query_indeterminate(tmp_path: Path
         "search_field": "emb_768",
         "output_fields": [],
         "top_k": 100,
+        "query_count": 2,
     }
     runner.event_path.write_text(
         json.dumps(header, separators=(",", ":"))
         + "\n"
-        + json.dumps({"event": "started", "namespace": "run_2_01", "pass": "first"})
+        + json.dumps({"event": "started", "namespace": "run_2_01", "pass": "first", "query_index": 0})
         + "\n"
     )
 
     with pytest.raises(MultiTenantSearchIncomplete) as failure:
         runner.run()
 
-    assert db.calls == []
-    assert failure.value.summary["groups"]["B"]["first"]["outcomes"] == {"indeterminate": 1}
-    assert failure.value.summary["groups"]["B"]["repeat"]["outcomes"] == {"skipped": 1}
+    assert [namespace for namespace, _ in db.calls] == ["run_2_01", "run_2_01"]
+    assert failure.value.summary["groups"]["B"]["cold"]["outcomes"] == {"indeterminate": 1}
+    assert failure.value.summary["groups"]["B"]["repeat"]["outcomes"] == {"skipped": 1, "completed": 1}
 
 
 def test_multitenant_search_resumes_repeat_that_never_started(tmp_path: Path) -> None:
@@ -207,6 +230,19 @@ def test_multitenant_search_resumes_repeat_that_never_started(tmp_path: Path) ->
                 "event": "completed",
                 "namespace": "run_2_01",
                 "pass": "first",
+                "query_index": 0,
+                "client_latency_ms": 1,
+                "result_count": 1,
+                "performance": {},
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "event": "completed",
+                "namespace": "run_2_01",
+                "pass": "first",
+                "query_index": 1,
                 "client_latency_ms": 1,
                 "result_count": 1,
                 "performance": {},
@@ -217,7 +253,10 @@ def test_multitenant_search_resumes_repeat_that_never_started(tmp_path: Path) ->
 
     summary = runner.run()
 
-    assert [(namespace, request.mode) for namespace, request in db.calls] == [("run_2_01", "dense")]
+    assert [(namespace, request.mode) for namespace, request in db.calls] == [
+        ("run_2_01", "dense"),
+        ("run_2_01", "dense"),
+    ]
     assert summary["status"] == "complete"
 
 
@@ -296,13 +335,16 @@ def test_multitenant_setup_cli_can_exclude_the_5m_namespace() -> None:
             "multitenant_bm25_field": "content",
             "multitenant_profile": "small",
             "multitenant_exclude_5m": True,
+            "multitenant_queries_file": "/tmp/queries.json",
         }
     )
 
     assert custom_case["exclude_5m"] is True
+    assert custom_case["queries_file"] == "/tmp/queries.json"
     case = CaseConfig(case_id=CaseType.TurboPufferMultiTenantColdStart, custom_case=custom_case).case
     assert isinstance(case, TurboPufferMultiTenantColdStartCase)
     assert case.exclude_5m is True
+    assert case.queries_file == "/tmp/queries.json"
 
     with pytest.raises(ValueError, match="exclude_5m applies only to the setup operation"):
         CaseConfig(
@@ -311,6 +353,18 @@ def test_multitenant_setup_cli_can_exclude_the_5m_namespace() -> None:
                 "operation": "dense",
                 "manifest_path": "/tmp/setup.json",
                 "exclude_5m": True,
+            },
+        ).case
+
+    with pytest.raises(ValueError, match="setup requires queries_file"):
+        CaseConfig(
+            case_id=CaseType.TurboPufferMultiTenantColdStart,
+            custom_case={
+                "operation": "setup",
+                "manifest_path": "/tmp/setup.json",
+                "prepared_data": "/tmp/prepared.parquet",
+                "run_prefix": "run",
+                "profile": "small",
             },
         ).case
 

@@ -20,9 +20,10 @@ from vectordb_bench.backend.customized import CustomizedRequest, CustomizedRow, 
 
 log = logging.getLogger(__name__)
 
-MANIFEST_VERSION = 4
+MANIFEST_VERSION = 5
 SEARCH_RESULT_VERSION = 1
 SEARCH_ORDER_SEED = 20260914
+QUERIES_FILE_VERSION = 1
 NAMESPACE_PROFILE_COUNTS = {"small": 20, "medium": 100, "large": 300}
 
 SOURCE_FIELDS = (
@@ -139,13 +140,50 @@ def namespace_profile(groups: tuple[NamespaceGroup, ...]) -> str:
 
 
 @dataclass(frozen=True)
+class SearchQuery:
+    """One shared out-of-sample query used against every namespace."""
+
+    index: int
+    dense: tuple[float, ...]
+    bm25: str
+
+
+def load_queries_file(path: Path) -> list[SearchQuery]:
+    with path.open() as source:
+        queries = json.load(source)
+    if queries.get("version") != QUERIES_FILE_VERSION:
+        raise ValueError(f"queries file must have version {QUERIES_FILE_VERSION}")
+    entries = queries.get("queries", [])
+    count = queries.get("count")
+    if not isinstance(count, int) or count != len(entries) or count <= 0:
+        raise ValueError("queries file must declare a positive count matching its entries")
+    loaded = []
+    for entry in entries:
+        index = entry.get("index")
+        dense = entry.get("dense")
+        bm25 = entry.get("bm25")
+        if (
+            not isinstance(index, int)
+            or not isinstance(dense, list)
+            or len(dense) != 768
+            or not all(isinstance(value, (int, float)) for value in dense)
+            or not isinstance(bm25, str)
+            or not bm25.strip()
+        ):
+            raise ValueError("queries file contains an invalid query entry")
+        loaded.append(SearchQuery(index=index, dense=tuple(float(value) for value in dense), bm25=bm25))
+    if sorted(query.index for query in loaded) != list(range(len(loaded))):
+        raise ValueError("queries file indices must be 0..count-1")
+    return loaded
+
+
+@dataclass(frozen=True)
 class NamespaceSpec:
     name: str
     group: str
     rows: int
     source_start: int
     source_end: int
-    fixture: str
 
 
 @dataclass(frozen=True)
@@ -164,19 +202,6 @@ class NamespaceBatch:
             )
             for index in range(self.record_batch.num_rows)
         ]
-
-    def query_fixture(self, dense_field: str, bm25_field: str) -> dict[str, Any]:
-        if not self.first or not self.record_batch.num_rows:
-            raise ValueError("query fixture requires the first non-empty namespace batch")
-        columns = self.record_batch.slice(0, 1).to_pydict()
-        return {
-            "namespace": self.namespace.name,
-            "group": self.namespace.group,
-            "row_count": self.namespace.rows,
-            "id": columns["id"][0],
-            "dense": {"field": dense_field, "value": columns[dense_field][0]},
-            "bm25": {"field": bm25_field, "value": columns[bm25_field][0]},
-        }
 
 
 class PreparedMultiTenantDataset:
@@ -199,7 +224,7 @@ class PreparedMultiTenantDataset:
     def namespace_name(run_prefix: str, group: NamespaceGroup, ordinal: int) -> str:
         return f"{run_prefix}_{group.suffix}_{ordinal:0{group.id_width}d}"
 
-    def namespace_specs(self, run_prefix: str, fixture_directory: str) -> list[NamespaceSpec]:
+    def namespace_specs(self, run_prefix: str) -> list[NamespaceSpec]:
         specs = []
         for group in self.groups:
             for ordinal in range(1, group.namespace_count + 1):
@@ -212,7 +237,6 @@ class PreparedMultiTenantDataset:
                         rows=group.rows_per_namespace,
                         source_start=start,
                         source_end=start + group.rows_per_namespace,
-                        fixture=f"{fixture_directory}/{name}.json",
                     )
                 )
         return specs
@@ -221,12 +245,11 @@ class PreparedMultiTenantDataset:
         self,
         run_prefix: str,
         group: NamespaceGroup,
-        fixture_directory: str,
         batch_size: int,
     ):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
-        specs = self.namespace_specs(run_prefix, fixture_directory)
+        specs = self.namespace_specs(run_prefix)
         group_specs = [spec for spec in specs if spec.group == group.key]
         parquet_file = pq.ParquetFile(self.path, memory_map=True, pre_buffer=True)
         consumed = 0
@@ -260,6 +283,7 @@ class MultiTenantSetupRunner:
         manifest_path: Path,
         run_prefix: str,
         *,
+        queries_file: Path | None = None,
         dense_field: str = "emb_768",
         bm25_field: str = "content",
         batch_size: int = config.DEFAULT_INSERT_BATCH_SIZE,
@@ -270,6 +294,8 @@ class MultiTenantSetupRunner:
             raise ValueError("run_prefix must contain only letters, numbers, '_' or '-'")
         if batch_size <= 0 or max_retries < 0 or retry_delay < 0:
             raise ValueError("batch_size must be positive and retry settings must be non-negative")
+        if queries_file is None:
+            raise ValueError("setup requires a shared queries file")
         self.db = db
         self.dataset = dataset
         self.profile = namespace_profile(dataset.groups)
@@ -278,10 +304,12 @@ class MultiTenantSetupRunner:
         self.dense_field = dense_field
         self.bm25_field = bm25_field
         self.schema = customized_schema(dense_field, bm25_field)
+        self.queries_file = queries_file.resolve()
+        self.queries = load_queries_file(self.queries_file)
         self.batch_size = batch_size
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self.fixture_dir = self.manifest_path.with_suffix(".fixtures")
+        self.queries_sidecar = self.manifest_path.with_suffix(".queries.json")
         self.checkpoint_path = self.manifest_path.with_suffix(".checkpoints.jsonl")
 
     @staticmethod
@@ -295,7 +323,22 @@ class MultiTenantSetupRunner:
         partial.replace(path)
 
     def _specs(self) -> list[NamespaceSpec]:
-        return self.dataset.namespace_specs(self.run_prefix, self.fixture_dir.name)
+        return self.dataset.namespace_specs(self.run_prefix)
+
+    def _write_queries_sidecar(self) -> None:
+        self._write_json(
+            self.queries_sidecar,
+            {
+                "version": QUERIES_FILE_VERSION,
+                "count": len(self.queries),
+                "dense_field": self.dense_field,
+                "bm25_field": self.bm25_field,
+                "queries": [
+                    {"index": query.index, "dense": list(query.dense), "bm25": query.bm25}
+                    for query in self.queries
+                ],
+            },
+        )
 
     def _manifest(self) -> dict[str, Any]:
         specs = self._specs()
@@ -311,12 +354,13 @@ class MultiTenantSetupRunner:
             "field_mapping": {"$meta": "meta_json"},
             "schema": {name: asdict(field) for name, field in self.schema.items()},
             "search_fields": {"dense": self.dense_field, "bm25": self.bm25_field},
+            "queries_file": self.queries_sidecar.name,
+            "query_count": len(self.queries),
             "groups": [asdict(group) for group in self.dataset.groups],
             "namespaces": [asdict(spec) for spec in specs],
             "search_order_seed": SEARCH_ORDER_SEED,
             "search_order": search_order,
             "checkpoint_file": self.checkpoint_path.name,
-            "fixture_directory": self.fixture_dir.name,
         }
 
     def _ensure_manifest(self) -> None:
@@ -327,7 +371,7 @@ class MultiTenantSetupRunner:
             if existing != expected:
                 raise ValueError(f"existing setup manifest does not match this run: {self.manifest_path}")
             return
-        if self.checkpoint_path.exists() or self.fixture_dir.exists():
+        if self.checkpoint_path.exists():
             raise FileExistsError("setup artifacts exist without a matching manifest")
         self._write_json(self.manifest_path, expected)
 
@@ -363,19 +407,16 @@ class MultiTenantSetupRunner:
     def run(self) -> dict[str, int | str]:
         if not self.db.supports_customized_api() or not self.db.supports_namespace_selection():
             raise NotImplementedError("multi-tenant setup requires customized rows and namespace selection")
+        self._write_queries_sidecar()
         self._ensure_manifest()
         specs = self._specs()
         by_name = {spec.name: spec for spec in specs}
         states = _setup_checkpoint_states(self.checkpoint_path, set(by_name))
         completed = {name for name, state in states.items() if state == "completed"}
-        for name in completed:
-            if not (self.manifest_path.parent / by_name[name].fixture).is_file():
-                raise ValueError(f"completed namespace is missing its query fixture: {name}")
         if len(completed) == len(specs):
             return self._summary(0, completed, len(specs))
 
         newly_inserted = 0
-        self.fixture_dir.mkdir(parents=True, exist_ok=True)
         with self.db.init():
             for group in self.dataset.groups:
                 group_names = {spec.name for spec in specs if spec.group == group.key}
@@ -383,11 +424,9 @@ class MultiTenantSetupRunner:
                     continue
                 active_name = None
                 active_count = 0
-                fixture = None
                 for batch in self.dataset.iter_group_batches(
                     self.run_prefix,
                     group,
-                    self.fixture_dir.name,
                     self.batch_size,
                 ):
                     spec = batch.namespace
@@ -402,24 +441,21 @@ class MultiTenantSetupRunner:
                         self.db.select_namespace(spec.name)
                         active_name = spec.name
                         active_count = 0
-                        fixture = batch.query_fixture(self.dense_field, self.bm25_field)
                     if active_name != spec.name:
                         raise RuntimeError(f"non-contiguous batches for namespace {spec.name}")
                     rows = batch.customized_rows(self.schema)
                     self._insert(spec.name, rows)
                     active_count += len(rows)
                     if batch.last:
-                        if active_count != spec.rows or fixture is None:
+                        if active_count != spec.rows:
                             raise RuntimeError(
                                 f"namespace {spec.name} inserted {active_count} rows, expected {spec.rows}"
                             )
-                        self._write_json(self.manifest_path.parent / spec.fixture, fixture)
                         self._append_checkpoint(spec, "completed", active_count)
                         states[spec.name] = "completed"
                         completed.add(spec.name)
                         newly_inserted += active_count
                         active_name = None
-                        fixture = None
         return self._summary(newly_inserted, completed, len(specs))
 
     def _summary(self, inserted_rows: int, completed: set[str], total_namespaces: int) -> dict[str, int | str]:
@@ -429,6 +465,7 @@ class MultiTenantSetupRunner:
             "total_rows": sum(group.source_rows for group in self.dataset.groups),
             "completed_namespaces": len(completed),
             "total_namespaces": total_namespaces,
+            "queries": len(self.queries),
             "manifest": str(self.manifest_path),
         }
 
@@ -493,12 +530,25 @@ class MultiTenantSearchRunner:
         if unknown_outputs:
             raise ValueError(f"output fields are not declared in the manifest: {unknown_outputs}")
 
+        queries_file = self.manifest.get("queries_file")
+        query_count = self.manifest.get("query_count")
+        if not isinstance(queries_file, str) or not isinstance(query_count, int) or query_count <= 0:
+            raise ValueError("setup manifest must declare its shared queries file")
+        queries_path = (self.manifest_path.parent / queries_file).resolve()
+        if self.manifest_path.parent not in queries_path.parents:
+            raise ValueError(f"queries file escapes the manifest directory: {queries_file}")
+        self.queries = load_queries_file(queries_path)
+        if len(self.queries) != query_count:
+            raise ValueError("manifest query_count does not match its queries file")
+
         entries = self.manifest.get("namespaces", [])
         self.namespaces = {entry["name"]: entry for entry in entries}
         order = self.manifest.get("search_order", [])
         if len(self.namespaces) != len(entries) or set(order) != set(self.namespaces) or len(order) != len(entries):
             raise ValueError("manifest namespaces and search order do not match")
-        self.search_order = [name for name in order if self.group == "all" or self.namespaces[name]["group"] == self.group]
+        self.search_order = [
+            name for name in order if self.group == "all" or self.namespaces[name]["group"] == self.group
+        ]
         if not self.search_order:
             raise ValueError(f"manifest contains no namespaces for group {self.group}")
 
@@ -533,6 +583,7 @@ class MultiTenantSearchRunner:
             "search_field": self.search_field,
             "output_fields": list(self.output_fields),
             "top_k": self.top_k,
+            "query_count": len(self.queries),
         }
 
     def _events(self) -> list[dict[str, Any]]:
@@ -543,54 +594,45 @@ class MultiTenantSearchRunner:
         if not events or events[0] != self._header():
             raise ValueError(f"search checkpoint does not match this run: {self.event_path}")
         for event in events[1:]:
-            if event.get("namespace") not in self.namespaces or event.get("pass") not in {"first", "repeat"}:
+            if (
+                event.get("namespace") not in self.namespaces
+                or event.get("pass") not in {"first", "repeat"}
+                or not isinstance(event.get("query_index"), int)
+                or not 0 <= event["query_index"] < len(self.queries)
+            ):
                 raise ValueError(f"invalid search checkpoint event: {self.event_path}")
         return events
 
     @staticmethod
-    def _states(events: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
-        return {(event["namespace"], event["pass"]): event for event in events[1:]}
+    def _states(events: list[dict[str, Any]]) -> dict[tuple[str, str, int], dict[str, Any]]:
+        return {(event["namespace"], event["pass"], event["query_index"]): event for event in events[1:]}
 
-    def _append_state(self, namespace: str, pass_name: str, event: str, **values: Any) -> dict[str, Any]:
-        value = {"event": event, "namespace": namespace, "pass": pass_name, **values}
+    def _append_state(self, namespace: str, pass_name: str, query_index: int, event: str, **values: Any) -> dict[str, Any]:
+        value = {"event": event, "namespace": namespace, "pass": pass_name, "query_index": query_index, **values}
         self._append_jsonl(self.event_path, value)
         return value
 
-    def _normalize_interrupted(self, states: dict[tuple[str, str], dict[str, Any]]) -> None:
+    def _normalize_interrupted(self, states: dict[tuple[str, str, int], dict[str, Any]]) -> None:
         for namespace in self.search_order:
-            first = states.get((namespace, "first"))
-            repeat = states.get((namespace, "repeat"))
-            if first and first["event"] == "started":
-                states[(namespace, "first")] = self._append_state(namespace, "first", "indeterminate")
-                if repeat is None:
-                    states[(namespace, "repeat")] = self._append_state(namespace, "repeat", "skipped")
-            elif first and first["event"] == "error" and repeat is None:
-                states[(namespace, "repeat")] = self._append_state(namespace, "repeat", "skipped")
-            elif first and first["event"] == "indeterminate" and repeat is None:
-                states[(namespace, "repeat")] = self._append_state(namespace, "repeat", "skipped")
-            elif repeat and repeat["event"] == "started":
-                states[(namespace, "repeat")] = self._append_state(namespace, "repeat", "indeterminate")
+            for query in self.queries:
+                for pass_name in ("first", "repeat"):
+                    state = states.get((namespace, pass_name, query.index))
+                    if state and state["event"] == "started":
+                        states[(namespace, pass_name, query.index)] = self._append_state(
+                            namespace, pass_name, query.index, "indeterminate"
+                        )
 
-    def _fixture(self, namespace: str) -> dict[str, Any]:
-        relative = Path(self.namespaces[namespace]["fixture"])
-        fixture_path = (self.manifest_path.parent / relative).resolve()
-        if self.manifest_path.parent not in fixture_path.parents:
-            raise ValueError(f"fixture path escapes the manifest directory: {relative}")
-        with fixture_path.open() as source:
-            fixture = json.load(source)
-        query = fixture.get(self.mode, {})
-        if fixture.get("namespace") != namespace or query.get("field") != self.search_field:
-            raise ValueError(f"query fixture does not match the manifest: {fixture_path}")
-        return query
+    def _query_value(self, query: SearchQuery) -> Any:
+        return list(query.dense) if self.mode == "dense" else query.bm25
 
-    def _query(self, namespace: str, pass_name: str, query: dict[str, Any]) -> dict[str, Any]:
-        self._append_state(namespace, pass_name, "started")
+    def _query(self, namespace: str, pass_name: str, query_index: int, value: Any) -> dict[str, Any]:
+        self._append_state(namespace, pass_name, query_index, "started")
         started = time.perf_counter()
         try:
             request = CustomizedRequest(
                 self.mode,
                 self.search_field,
-                query["value"],
+                value,
                 self.top_k,
                 self.output_fields,
             )
@@ -606,6 +648,7 @@ class MultiTenantSearchRunner:
             return self._append_state(
                 namespace,
                 pass_name,
+                query_index,
                 "completed",
                 client_latency_ms=round(latency_ms, 4),
                 result_count=len(result.ids),
@@ -617,6 +660,7 @@ class MultiTenantSearchRunner:
             return self._append_state(
                 namespace,
                 pass_name,
+                query_index,
                 "error",
                 client_latency_ms=round(latency_ms, 4),
                 error_type=type(error).__name__,
@@ -627,15 +671,18 @@ class MultiTenantSearchRunner:
         latencies = [value for value in values if value is not None]
         if not latencies:
             return {"count": 0}
+        ordered = sorted(latencies)
         return {
-            "count": len(latencies),
-            "average_ms": round(float(np.mean(latencies)), 4),
-            "p50_ms": round(float(np.percentile(latencies, 50)), 4),
-            "p95_ms": round(float(np.percentile(latencies, 95)), 4),
-            "p99_ms": round(float(np.percentile(latencies, 99)), 4),
+            "count": len(ordered),
+            "min_ms": round(float(ordered[0]), 4),
+            "max_ms": round(float(ordered[-1]), 4),
+            "average_ms": round(float(np.mean(ordered)), 4),
+            "p50_ms": round(float(np.percentile(ordered, 50)), 4),
+            "p95_ms": round(float(np.percentile(ordered, 95)), 4),
+            "p99_ms": round(float(np.percentile(ordered, 99)), 4),
         }
 
-    def _summary(self, states: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+    def _summary(self, states: dict[tuple[str, str, int], dict[str, Any]]) -> dict[str, Any]:
         groups = {}
         for group in sorted({self.namespaces[name]["group"] for name in self.search_order}):
             names = [name for name in self.search_order if self.namespaces[name]["group"] == group]
@@ -643,9 +690,18 @@ class MultiTenantSearchRunner:
                 "rows_per_namespace": self.namespaces[names[0]]["rows"],
                 "namespace_count": len(names),
             }
-            for pass_name in ("first", "repeat"):
-                events = [states[(name, pass_name)] for name in names if (name, pass_name) in states]
-                group_summary[pass_name] = {
+            buckets = {
+                "cold": [(name, "first", 0) for name in names],
+                "first": [
+                    (name, "first", query.index) for name in names for query in self.queries
+                ],
+                "repeat": [
+                    (name, "repeat", query.index) for name in names for query in self.queries
+                ],
+            }
+            for bucket, keys in buckets.items():
+                events = [states[key] for key in keys if key in states]
+                group_summary[bucket] = {
                     **self._latency_stats(
                         [event["client_latency_ms"] for event in events if event["event"] == "completed"]
                     ),
@@ -668,8 +724,11 @@ class MultiTenantSearchRunner:
             groups[group] = group_summary
 
         completed_namespaces = sum(
-            states.get((name, "first"), {}).get("event") == "completed"
-            and states.get((name, "repeat"), {}).get("event") == "completed"
+            all(
+                states.get((name, pass_name, query.index), {}).get("event") == "completed"
+                for pass_name in ("first", "repeat")
+                for query in self.queries
+            )
             for name in self.search_order
         )
         summary = {
@@ -680,6 +739,7 @@ class MultiTenantSearchRunner:
             "search_field": self.search_field,
             "output_fields": list(self.output_fields),
             "top_k": self.top_k,
+            "query_count": len(self.queries),
             "namespace_count": len(self.search_order),
             "total_rows": sum(self.namespaces[name]["rows"] for name in self.search_order),
             "completed_namespaces": completed_namespaces,
@@ -697,19 +757,30 @@ class MultiTenantSearchRunner:
         self._normalize_interrupted(states)
         with self.db.init():
             for namespace in self.search_order:
-                first = states.get((namespace, "first"))
-                repeat = states.get((namespace, "repeat"))
-                if first is not None and (first["event"] != "completed" or repeat is not None):
+                all_complete = all(
+                    states.get((namespace, pass_name, query.index), {}).get("event") == "completed"
+                    for pass_name in ("first", "repeat")
+                    for query in self.queries
+                )
+                if all_complete:
                     continue
                 self.db.select_namespace(namespace)
-                query = self._fixture(namespace)
-                if first is None:
-                    first = self._query(namespace, "first", query)
-                    states[(namespace, "first")] = first
-                if first["event"] == "completed":
-                    states[(namespace, "repeat")] = self._query(namespace, "repeat", query)
-                else:
-                    states[(namespace, "repeat")] = self._append_state(namespace, "repeat", "skipped")
+                for query in self.queries:
+                    if (namespace, "first", query.index) not in states:
+                        states[(namespace, "first", query.index)] = self._query(
+                            namespace, "first", query.index, self._query_value(query)
+                        )
+                for query in self.queries:
+                    first_state = states.get((namespace, "first", query.index))
+                    if first_state and first_state["event"] == "completed":
+                        if states.get((namespace, "repeat", query.index), {}).get("event") != "completed":
+                            states[(namespace, "repeat", query.index)] = self._query(
+                                namespace, "repeat", query.index, self._query_value(query)
+                            )
+                    elif first_state and (namespace, "repeat", query.index) not in states:
+                        states[(namespace, "repeat", query.index)] = self._append_state(
+                            namespace, "repeat", query.index, "skipped"
+                        )
         summary = self._summary(states)
         if summary["status"] != "complete":
             raise MultiTenantSearchIncomplete(summary)

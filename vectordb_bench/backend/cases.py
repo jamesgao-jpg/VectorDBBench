@@ -768,6 +768,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
     bm25_field: str = "content"
     profile: str | None = None
     exclude_5m: bool = False
+    queries_file: str | None = None
     group: str = "all"
     output_fields: tuple[str, ...] = ()
 
@@ -781,6 +782,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
         bm25_field: str = "content",
         profile: str | None = None,
         exclude_5m: bool = False,
+        queries_file: str | None = None,
         group: str = "all",
         output_fields: tuple[str, ...] | list[str] = (),
         **kwargs,
@@ -798,10 +800,14 @@ class TurboPufferMultiTenantColdStartCase(Case):
             profile = profile or "medium"
             if profile not in {"small", "medium", "large"}:
                 raise ValueError("profile must be small, medium, or large")
+            if not queries_file:
+                raise ValueError("setup requires queries_file")
         elif profile is not None:
             raise ValueError("profile applies only to the setup operation")
         elif exclude_5m:
             raise ValueError("exclude_5m applies only to the setup operation")
+        elif queries_file is not None:
+            raise ValueError("queries_file applies only to the setup operation")
         if group not in {"all", "A", "B", "C", "D"}:
             raise ValueError("group must be all, A, B, C, or D")
         if operation == "setup" and group != "all":
@@ -835,6 +841,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
             bm25_field=bm25_field,
             profile=profile,
             exclude_5m=exclude_5m,
+            queries_file=queries_file,
             group=group,
             output_fields=output_fields,
             **kwargs,

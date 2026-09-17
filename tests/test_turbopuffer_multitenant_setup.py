@@ -40,6 +40,23 @@ def _write_prepared(path: Path, rows: int = 5) -> None:
     )
 
 
+def _write_queries(path: Path, count: int = 3) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "count": count,
+                "dense_field": "emb_768",
+                "bm25_field": "content",
+                "queries": [
+                    {"index": index, "dense": [float(index + 100)] * 768, "bm25": f"query-{index}"}
+                    for index in range(count)
+                ],
+            }
+        )
+    )
+
+
 class _FakeDB:
     def __init__(self):
         self.active_namespace = None
@@ -123,10 +140,14 @@ def test_namespace_profiles_keep_row_shapes_and_bound_source_rows() -> None:
 def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
     _write_prepared(prepared)
+    queries = tmp_path / "queries.json"
+    _write_queries(queries, count=2)
     dataset = PreparedMultiTenantDataset(prepared, _groups())
     db = _FakeDB()
     manifest = tmp_path / "setup.json"
-    runner = MultiTenantSetupRunner(db, dataset, manifest, "run", batch_size=3, max_retries=0)
+    runner = MultiTenantSetupRunner(
+        db, dataset, manifest, "run", queries_file=queries, batch_size=3, max_retries=0
+    )
 
     summary = runner.run()
 
@@ -134,18 +155,22 @@ def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path:
     assert summary["profile"] == "custom"
     assert summary["total_rows"] == 8
     assert summary["completed_namespaces"] == 3
+    assert summary["queries"] == 2
     assert list(db.rows["run_2_01"]) == [0, 1]
     assert list(db.rows["run_2_02"]) == [2, 3]
     assert list(db.rows["run_4_01"]) == [0, 1, 2, 3]
     manifest_data = json.loads(manifest.read_text())
+    assert manifest_data["version"] == 5
     assert len(manifest_data["namespaces"]) == 3
     assert manifest_data["profile"] == "custom"
     assert manifest_data["search_fields"] == {"dense": "emb_768", "bm25": "content"}
+    assert manifest_data["queries_file"] == "setup.queries.json"
+    assert manifest_data["query_count"] == 2
     assert sorted(manifest_data["search_order"]) == ["run_2_01", "run_2_02", "run_4_01"]
-    fixture = json.loads((tmp_path / "setup.fixtures/run_2_02.json").read_text())
-    assert fixture["id"] == 2
-    assert fixture["dense"]["value"] == [2.0] * 768
-    assert fixture["bm25"] == {"field": "content", "value": "content-2"}
+    queries_sidecar = json.loads((tmp_path / "setup.queries.json").read_text())
+    assert queries_sidecar["count"] == 2
+    assert queries_sidecar["queries"][0]["dense"][0] == 100.0
+    assert queries_sidecar["queries"][0]["bm25"] == "query-0"
 
     calls_before_resume = db.insert_calls
     resumed = runner.run()
@@ -157,6 +182,8 @@ def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path:
 def test_setup_can_select_the_manifest_bm25_field(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
     _write_prepared(prepared, rows=2)
+    queries = tmp_path / "queries.json"
+    _write_queries(queries, count=2)
     db = _FakeDB()
     manifest = tmp_path / "setup.json"
 
@@ -165,6 +192,7 @@ def test_setup_can_select_the_manifest_bm25_field(tmp_path: Path) -> None:
         PreparedMultiTenantDataset(prepared, (NamespaceGroup("A", "2", 2, 1, 2),)),
         manifest,
         "run",
+        queries_file=queries,
         bm25_field="vc_desc",
         max_retries=0,
     ).run()
@@ -172,13 +200,13 @@ def test_setup_can_select_the_manifest_bm25_field(tmp_path: Path) -> None:
     assert db.last_schema["content"].full_text_search is False
     assert db.last_schema["vc_desc"].full_text_search is True
     assert json.loads(manifest.read_text())["search_fields"]["bm25"] == "vc_desc"
-    fixture = json.loads((tmp_path / "setup.fixtures/run_2_01.json").read_text())
-    assert fixture["bm25"] == {"field": "vc_desc", "value": "description-0"}
 
 
 def test_setup_resumes_started_namespace_with_idempotent_ids(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
     _write_prepared(prepared, rows=2)
+    queries = tmp_path / "queries.json"
+    _write_queries(queries, count=2)
     group = (NamespaceGroup("A", "2", 2, 1, 2),)
     dataset = PreparedMultiTenantDataset(prepared, group)
     db = _FakeDB()
@@ -188,6 +216,7 @@ def test_setup_resumes_started_namespace_with_idempotent_ids(tmp_path: Path) -> 
         dataset,
         tmp_path / "setup.json",
         "run",
+        queries_file=queries,
         batch_size=2,
         max_retries=0,
     )
@@ -205,6 +234,8 @@ def test_setup_resumes_started_namespace_with_idempotent_ids(tmp_path: Path) -> 
 def test_setup_refuses_untracked_existing_namespace(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
     _write_prepared(prepared, rows=2)
+    queries = tmp_path / "queries.json"
+    _write_queries(queries, count=2)
     group = (NamespaceGroup("A", "2", 2, 1, 2),)
     db = _FakeDB()
     db.rows["run_2_01"] = {}
@@ -213,8 +244,53 @@ def test_setup_refuses_untracked_existing_namespace(tmp_path: Path) -> None:
         PreparedMultiTenantDataset(prepared, group),
         tmp_path / "setup.json",
         "run",
+        queries_file=queries,
         max_retries=0,
     )
 
     with pytest.raises(FileExistsError, match="refusing existing namespace"):
         runner.run()
+
+
+def test_setup_requires_a_queries_file(tmp_path: Path) -> None:
+    prepared = tmp_path / "prepared.parquet"
+    _write_prepared(prepared, rows=5)
+
+    with pytest.raises(ValueError, match="requires a shared queries file"):
+        MultiTenantSetupRunner(
+            _FakeDB(),
+            PreparedMultiTenantDataset(prepared, _groups()),
+            tmp_path / "setup.json",
+            "run",
+        )
+
+
+def test_setup_rejects_invalid_queries_file(tmp_path: Path) -> None:
+    prepared = tmp_path / "prepared.parquet"
+    _write_prepared(prepared, rows=5)
+    queries = tmp_path / "queries.json"
+    _write_queries(queries, count=2)
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "count": 1,
+                "dense_field": "emb_768",
+                "bm25_field": "content",
+                "queries": [{"index": 0, "dense": [1.0], "bm25": "query-0"}],
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="invalid query entry"):
+        MultiTenantSetupRunner(
+            _FakeDB(),
+            PreparedMultiTenantDataset(prepared, _groups()),
+            tmp_path / "setup.json",
+            "run",
+            queries_file=bad,
+        )
+
+    assert not (tmp_path / "setup.json").exists()
+    assert not (tmp_path / "setup.queries.json").exists()

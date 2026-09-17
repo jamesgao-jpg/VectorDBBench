@@ -234,6 +234,7 @@ def get_custom_case_config(parameters: dict) -> dict:
                     "bm25_field": parameters.get("multitenant_bm25_field", "content"),
                     "profile": parameters.get("multitenant_profile", "medium"),
                     "exclude_5m": parameters.get("multitenant_exclude_5m", False),
+                    "queries_file": parameters.get("multitenant_queries_file"),
                 }
             )
         return custom_case_config

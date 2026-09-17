@@ -216,6 +216,15 @@ class TurboPufferTypedDict(TypedDict):
             help="Skip the 5M-row D namespace during the setup operation",
         ),
     ]
+    multitenant_queries_file: Annotated[
+        str | None,
+        click.option(
+            "--multitenant-queries-file",
+            type=click.Path(dir_okay=False),
+            default=None,
+            help="Shared out-of-sample query JSON used by the setup operation",
+        ),
+    ]
     multitenant_group: Annotated[
         str,
         click.option(

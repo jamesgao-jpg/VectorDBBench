@@ -109,10 +109,44 @@ Also recorded the turbopuffer API token in git-ignored `turbopuffer_api_key.txt`
 Verified on the assigned remote worktree: 21 focused tests passed, ruff check introduced no new violations (33 pre-existing baseline unchanged), ruff format is clean for the new lines (4 pre-existing drift files left untouched), CLI help exposes the flag, and a setup dry-run carried `exclude_5m=True`. The real prepared Parquet resolves Small-no-5m to 60 namespaces and 380,000 rows. Changes are uncommitted on top of `d6c0f56`.
 - Files: `vectordb_bench/backend/turbopuffer_multitenant.py` (updated), `vectordb_bench/backend/clients/turbopuffer/cli.py` (updated), `vectordb_bench/cli/cli.py` (updated), `vectordb_bench/backend/cases.py` (updated), `vectordb_bench/backend/task_runner.py` (updated), `tests/test_turbopuffer_multitenant_setup.py` (updated), `tests/test_turbopuffer_multitenant_case.py` (updated), `docs/turbopuffer-multitenant/README.md` (updated), `turbopuffer_api_key.txt` (created, ignored), `AGENTS.md` (updated, repository-local and ignored)
 
+### 20. Run the stage-4 disposable Small pilot (live)
+Ran the live pilot on the remote client against real turbopuffer in `aws-us-west-2` with the Small profile and `--multitenant-exclude-5m` (60 namespaces, 380,000 rows, no D).
+
+Setup completed cleanly: `profile=small-no-5m`, `inserted_rows=380000`, `completed_namespaces=60/60`, 120 checkpoint events, 60 fixtures, manifest version 4 (groups A/B/C). Dense search over all groups completed: 60/60 namespaces × first+repeat passes, 0 errors, 240 completed events. Latency p50 (first/repeat ms): A 20.9/19.1, B 20.9/19.4, C 18.4/16.0; every event carries turbopuffer performance metadata (cache_temperature, cache_hit_ratio, server_total_ms, query_execution_ms). Security scan found no API token and no full-row payloads in the log, manifest, checkpoints, fixtures, or search artifacts; the API key is masked in logs. First-query cache_temperature was already "hot" (setup leaves namespaces warm), so cold-vs-warm separation should be interpreted with the backend-reported cache state.
+
+Artifacts under `/home/ubuntu/vdbbench-data-inspect/turbopuffer-runs/`: `dense-small-no5m-pilot.json` (manifest), `.checkpoints.jsonl`, `.fixtures/` (60), `dense-small-no5m-pilot.dense.search.jsonl`, `dense-small-no5m-pilot.dense.all.summary.json`. Live namespaces `tp_mt_small_no5m_pilot_20260917_*` (60) remain in turbopuffer pending user cleanup decision; the design forbids automatic namespace deletion.
+- Files: `SESSION_PROGRESS.md` (updated), `AGENTS.md` (updated, repository-local and ignored)
+
+### 21. Switch to a shared 100-query out-of-sample set with cold/warm passes
+Re-accessed the private S3 bucket (credentials still valid; 2,000 objects) and confirmed turbopuffer has no namespace-eviction API (`hint_cache_warm` and pinning only warm). Downloaded `wide_table_0010.parquet` (the first file beyond the 5M rows used for inserts) and added `scripts/extract_turbopuffer_multitenant_queries.py` to extract its first 100 `emb_768` vectors plus `content` strings into a deterministic JSON query file (`/home/ubuntu/vdbbench-data-inspect/turbopuffer-queries/queries.json`), so no query vector exists inside any namespace.
+
+Reworked the case to use the shared query set: manifest v5 records `queries_file`/`query_count` and setup copies it to a `<manifest>.queries.json` sidecar via the new setup-only `--multitenant-queries-file` option. The search runner now queries every namespace with all 100 queries in pass `first` (query 0 is the cold sample, 1-99 the warm-up ramp) then all 100 again in pass `repeat`; events carry `query_index`, resume is per (namespace, pass, query), and per-group summaries report `cold` (query 0 of pass `first`) and `warm` (all of pass `repeat`) buckets with client/server latency percentiles. Per-namespace query fixtures were removed. Updated cases.py, both CLIs, task_runner.py, tests, README, and the design doc.
+
+Verified on the assigned remote worktree: 28 focused tests passed (setup, search, resume, CLI config, extraction), ruff introduced no new violations in shared code (module diff is empty vs HEAD), the new script matches the sibling prepare script's accepted baseline (7 EM102 + 1 T201), and a setup dry-run carried `queries_file` end to end.
+
+Calibrated cold eviction on the old pilot namespaces (idle ~1.5-2h): every namespace pays a one-time 58-96 ms `server_total_ms` on its first query versus 10-20 ms warm (4-6x cold/warm ratio), but `cache_temperature`/`cache_hit_ratio` report `hot`/`1.0` even on that load query, so server latency is the cold discriminator, not the reported cache state. The original pilot's "cold" numbers (~18-21 ms) were therefore warm measurements.
+- Files: `scripts/extract_turbopuffer_multitenant_queries.py` (created), `tests/test_extract_turbopuffer_multitenant_queries.py` (created), `vectordb_bench/backend/turbopuffer_multitenant.py` (updated), `vectordb_bench/backend/clients/turbopuffer/cli.py` (updated), `vectordb_bench/cli/cli.py` (updated), `vectordb_bench/backend/cases.py` (updated), `vectordb_bench/backend/task_runner.py` (updated), `tests/test_turbopuffer_multitenant_setup.py` (updated), `tests/test_turbopuffer_multitenant_case.py` (updated), `docs/turbopuffer-multitenant/README.md` (updated), `docs/turbopuffer-scaled-multitenant-design.md` (updated), `SESSION_PROGRESS.md` (updated)
+
+### 22. Run the cold/warm 100-query pilot (live, with eviction wait)
+Ran the fresh Small no-5m pilot on the remote client: 60 namespaces, 380K rows, prefix `tp_mt_small_no5m_100q_20260917`, 100-query shared out-of-sample set, dense mode. Setup completed at 06:01:59 (`profile=small-no-5m`, 60/60 namespaces, `queries=100`), then a 60-minute idle wait for cache eviction, then the search ran 24,000 measured queries (100 queries × 2 passes × 60 namespaces) with zero errors in ~4 minutes.
+
+Results (all 60 namespaces completed): three summary buckets per group — `cold` (query 0 of pass `first`, 20/group — the only genuinely cold query per namespace), `first` (full cold pass, 2,000/group), `repeat` (warm pass, 2,000/group) — each with client/server min/max/avg/p50/p95/p99:
+- Cold (query 0) client p50 / server avg: A 71.1 / 70.0 ms, B 78.6 / 76.0 ms, C 80.5 / 81.1 ms; client range 43-156 ms.
+- First pass client p50 / p99: A 17.1 / 54.3 ms, B 17.8 / 82.0 ms, C 14.1 / 61.2 ms — diluted by 99 warm samples per namespace; the cold signal appears in max/p99.
+- Repeat (warm) pass client p50 / p99: A 16.7 / 41.7 ms, B 17.6 / 51.5 ms, C 14.1 / 35.0 ms.
+- Truly-cold vs warm ratio ~4.6-5.7x (cold p50 vs repeat p50); cold scales mildly with namespace size (70 -> 76 -> 81 ms server avg), warm is flat.
+- The 60-minute wait was sufficient for eviction (shorter than the >=1.5h observed earlier); cold samples carry the one-time load cost.
+- Every event still reports `cache_temperature=hot`/`cache_hit_ratio=1.0` even on cold-load queries; `server_total_ms` is the cold discriminator (as documented).
+
+Security scan clean: no API token and no full-row payload values in the manifest, queries sidecar, checkpoints, search JSONL, summary, or logs. Artifacts: `dense-small-no5m-100q.json`, `.checkpoints.jsonl`, `.queries.json`, `.dense.search.jsonl` (24,001 lines), `.dense.all.summary.json`.
+- Files: `SESSION_PROGRESS.md` (updated), `AGENTS.md` (updated, repository-local and ignored)
+
 ## Current Status
-The design and four implementation stages are recorded. Stages 1-3 are committed through `d6c0f569f863ebb633a2104af313260434f284db` (profile refinement and run README included; 4 commits ahead of `origin/main`, not pushed). The `--multitenant-exclude-5m` setup flag is implemented and remotely verified but uncommitted. The turbopuffer API token is available on the remote worktree; stage-4 still needs the region confirmed before the disposable live pilot. No live turbopuffer namespace has been created.
+The design and four implementation stages are recorded. Stages 1-3 plus the exclude-5m flag are committed through `1225e19c165f667059aa3bab471db01cee351229` (5 commits ahead of `origin/main`, not pushed). The shared 100-query cold/warm design (manifest v5) is implemented, remotely verified (28 tests), and the fresh Small no-5m pilot PASSED with a genuine cold/warm separation (~71-81 ms cold vs ~11-18 ms warm, 60-min idle wait). The query-set rework and pilot records remain uncommitted. No Medium or Large load has been run.
 
 ## Open Issues
-- Confirm the turbopuffer region for the stage-4 live pilot (`aws-us-east-1` default); the API token is now available from the remote worktree token file.
-- Confirm with the stage-4 live pilot that the projected wide schema and deterministic IDs are accepted by turbopuffer.
-- The second pass is an after-one-query observation, not guaranteed cache residency; use the backend-reported cache state when interpreting it.
+- Decide whether to delete the disposable pilot namespaces (`tp_mt_small_no5m_pilot_20260917_*` and `tp_mt_small_no5m_100q_20260917_*`, 120 total) from turbopuffer (the design forbids automatic deletion).
+- BM25 needs a fresh prefix and manifest (separate ~1.5 GB insert) before its first query can be treated as cold.
+- Confirm the minimum idle time for namespace eviction (60 minutes is now proven sufficient; a shorter bound remains untested).
+- Confirm with the wider run that the projected wide schema and deterministic IDs remain accepted at Medium/Large scale.
+- Turbopuffer's `cache_temperature`/`cache_hit_ratio` report hot even on eviction-load queries; use `server_total_ms`/client latency as the cold discriminator.

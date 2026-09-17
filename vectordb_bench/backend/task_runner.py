@@ -588,6 +588,7 @@ class CaseRunner(BaseModel):
                 dataset,
                 manifest_path,
                 self.ca.run_prefix,
+                queries_file=Path(self.ca.queries_file),
                 dense_field=self.ca.dense_field,
                 bm25_field=self.ca.bm25_field,
                 batch_size=self.config.insert_batch_size,

@@ -19,3 +19,6 @@ vectordb_bench/results/cloudleaderboard/
 # AI rules
 CLAUDE.md
 AGENTS.md
+
+# Secrets
+turbopuffer_api_key.txt

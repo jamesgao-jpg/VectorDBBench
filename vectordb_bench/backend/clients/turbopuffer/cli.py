@@ -207,6 +207,15 @@ class TurboPufferTypedDict(TypedDict):
             help="Namespace-count profile used by the setup operation",
         ),
     ]
+    multitenant_exclude_5m: Annotated[
+        bool,
+        click.option(
+            "--multitenant-exclude-5m",
+            is_flag=True,
+            default=False,
+            help="Skip the 5M-row D namespace during the setup operation",
+        ),
+    ]
     multitenant_group: Annotated[
         str,
         click.option(

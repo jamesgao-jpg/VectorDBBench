@@ -282,6 +282,39 @@ def test_multitenant_setup_cli_requires_data_and_prefix() -> None:
         )
 
 
+def test_multitenant_setup_cli_can_exclude_the_5m_namespace() -> None:
+    custom_case = get_custom_case_config(
+        {
+            "case_type": "TurboPufferMultiTenantColdStart",
+            "multitenant_operation": "setup",
+            "multitenant_manifest": "/tmp/setup.json",
+            "multitenant_group": "all",
+            "multitenant_output_fields": [],
+            "multitenant_prepared_data": "/tmp/prepared.parquet",
+            "multitenant_run_prefix": "run",
+            "multitenant_dense_field": "emb_768",
+            "multitenant_bm25_field": "content",
+            "multitenant_profile": "small",
+            "multitenant_exclude_5m": True,
+        }
+    )
+
+    assert custom_case["exclude_5m"] is True
+    case = CaseConfig(case_id=CaseType.TurboPufferMultiTenantColdStart, custom_case=custom_case).case
+    assert isinstance(case, TurboPufferMultiTenantColdStartCase)
+    assert case.exclude_5m is True
+
+    with pytest.raises(ValueError, match="exclude_5m applies only to the setup operation"):
+        CaseConfig(
+            case_id=CaseType.TurboPufferMultiTenantColdStart,
+            custom_case={
+                "operation": "dense",
+                "manifest_path": "/tmp/setup.json",
+                "exclude_5m": True,
+            },
+        ).case
+
+
 def test_multitenant_result_serializes_compact_summary() -> None:
     task = TaskConfig(
         db=DB.Test,

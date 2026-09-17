@@ -14,6 +14,18 @@ The profile changes only the number of namespaces. Rows per namespace remain 1K,
 
 Start with `small` for the live pilot. Use `medium` for the normal comparison. Use `large` only when Medium's confidence intervals are too wide. P99 is descriptive rather than an acceptance metric because there are too few tail observations even in Large.
 
+### Skip the 5M-row namespace
+
+Add `--multitenant-exclude-5m` to the **setup** command to skip the single 5M-row D namespace. The A/B/C namespace counts are unchanged, so the profile reports as `small-no-5m`, `medium-no-5m`, or `large-no-5m`:
+
+| Profile + flag | Namespaces | Total rows |
+| --- | ---: | ---: |
+| `small` + `--multitenant-exclude-5m` | 60 | 380K |
+| `medium` + `--multitenant-exclude-5m` | 300 | 1.9M |
+| `large` + `--multitenant-exclude-5m` | 900 | 5.7M |
+
+Setup summary for the flagged Small run is `profile=small-no-5m`, `completed_namespaces=60`, `total_namespaces=60`, and `total_rows=380000`. Search commands stay unchanged and read the namespaces from the manifest; do not pass `--multitenant-group D` for a manifest created with the flag.
+
 ## Prerequisites
 
 Run commands on the designated remote client in `/home/ubuntu/VectorDBBench-stage1-test`. The prepared source should be:
@@ -71,6 +83,8 @@ PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
   --multitenant-prepared-data "$MULTITENANT_DATA" \
   --multitenant-run-prefix "$DENSE_PREFIX"
 ```
+
+Add `--multitenant-exclude-5m` to skip the 5M-row D namespace for a cheaper pilot.
 
 Expected setup summary values are `profile=small`, `completed_namespaces=61`, `total_namespaces=61`, and `total_rows=5380000`. Setup does not issue measured search queries.
 

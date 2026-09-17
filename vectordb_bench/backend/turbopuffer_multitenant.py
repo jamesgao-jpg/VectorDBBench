@@ -20,7 +20,7 @@ from vectordb_bench.backend.customized import CustomizedRequest, CustomizedRow, 
 
 log = logging.getLogger(__name__)
 
-MANIFEST_VERSION = 3
+MANIFEST_VERSION = 4
 SEARCH_RESULT_VERSION = 1
 SEARCH_ORDER_SEED = 20260914
 NAMESPACE_PROFILE_COUNTS = {"small": 20, "medium": 100, "large": 300}
@@ -111,17 +111,19 @@ class NamespaceGroup:
         return self.rows_per_namespace * self.namespace_count
 
 
-def namespace_groups(profile: str) -> tuple[NamespaceGroup, ...]:
+def namespace_groups(profile: str, *, include_5m: bool = True) -> tuple[NamespaceGroup, ...]:
     try:
         namespace_count = NAMESPACE_PROFILE_COUNTS[profile]
     except KeyError as error:
         raise ValueError("namespace profile must be small, medium, or large") from error
-    return (
+    groups = [
         NamespaceGroup("A", "1000", 1_000, namespace_count, 4),
         NamespaceGroup("B", "3000", 3_000, namespace_count, 4),
         NamespaceGroup("C", "15000", 15_000, namespace_count, 3),
-        NamespaceGroup("D", "5m", 5_000_000, 1, 7),
-    )
+    ]
+    if include_5m:
+        groups.append(NamespaceGroup("D", "5m", 5_000_000, 1, 7))
+    return tuple(groups)
 
 
 DEFAULT_NAMESPACE_GROUPS = namespace_groups("medium")
@@ -131,6 +133,8 @@ def namespace_profile(groups: tuple[NamespaceGroup, ...]) -> str:
     for profile in NAMESPACE_PROFILE_COUNTS:
         if groups == namespace_groups(profile):
             return profile
+        if groups == namespace_groups(profile, include_5m=False):
+            return f"{profile}-no-5m"
     return "custom"
 
 

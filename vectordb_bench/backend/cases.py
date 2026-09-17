@@ -767,6 +767,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
     dense_field: str = "emb_768"
     bm25_field: str = "content"
     profile: str | None = None
+    exclude_5m: bool = False
     group: str = "all"
     output_fields: tuple[str, ...] = ()
 
@@ -779,6 +780,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
         dense_field: str = "emb_768",
         bm25_field: str = "content",
         profile: str | None = None,
+        exclude_5m: bool = False,
         group: str = "all",
         output_fields: tuple[str, ...] | list[str] = (),
         **kwargs,
@@ -798,6 +800,8 @@ class TurboPufferMultiTenantColdStartCase(Case):
                 raise ValueError("profile must be small, medium, or large")
         elif profile is not None:
             raise ValueError("profile applies only to the setup operation")
+        elif exclude_5m:
+            raise ValueError("exclude_5m applies only to the setup operation")
         if group not in {"all", "A", "B", "C", "D"}:
             raise ValueError("group must be all, A, B, C, or D")
         if operation == "setup" and group != "all":
@@ -830,6 +834,7 @@ class TurboPufferMultiTenantColdStartCase(Case):
             dense_field=dense_field,
             bm25_field=bm25_field,
             profile=profile,
+            exclude_5m=exclude_5m,
             group=group,
             output_fields=output_fields,
             **kwargs,

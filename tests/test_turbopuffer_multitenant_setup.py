@@ -110,6 +110,12 @@ def test_namespace_profiles_keep_row_shapes_and_bound_source_rows() -> None:
         assert max(group.source_rows for group in groups) <= 5_000_000
         assert namespace_profile(groups) == profile
 
+        no_5m = namespace_groups(profile, include_5m=False)
+        assert [group.key for group in no_5m] == ["A", "B", "C"]
+        assert [group.rows_per_namespace for group in no_5m] == [1_000, 3_000, 15_000]
+        assert [group.namespace_count for group in no_5m] == [count, count, count]
+        assert namespace_profile(no_5m) == f"{profile}-no-5m"
+
     with pytest.raises(ValueError, match="small, medium, or large"):
         namespace_groups("unknown")
 

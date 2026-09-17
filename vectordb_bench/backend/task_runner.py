@@ -581,7 +581,7 @@ class CaseRunner(BaseModel):
         if self.ca.operation == "setup":
             dataset = PreparedMultiTenantDataset(
                 Path(self.ca.prepared_data),
-                namespace_groups(self.ca.profile),
+                namespace_groups(self.ca.profile, include_5m=not self.ca.exclude_5m),
             )
             summary = MultiTenantSetupRunner(
                 self.db,

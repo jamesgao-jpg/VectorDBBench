@@ -142,6 +142,8 @@ Search returns IDs only by default. To exercise selected attributes, add:
 
 VDBBench validates the returned columns and counts, then discards their values. Query vectors, query text, result IDs, and returned attribute values are not written to the measurement artifact.
 
+A search can be **re-run on the same manifest/namespace with different `--multitenant-output-fields`** (no re-setup, no re-insert): the runner restarts that mode's measurement and writes a per-payload summary named `{manifest}.{mode}.{fields...}.summary.json` (e.g. `dense-5m.dense.vc_uuid-vc_tag.summary.json`), keeping earlier payload summaries intact. Only the returned-attribute set may change; a different mode (`dense` vs `bm25`) or search parameters still requires a separate setup manifest.
+
 ## Artifacts
 
 For `dense.json`, setup creates:

@@ -469,7 +469,11 @@ class MultiTenantSearchRunner:
         self.manifest = json.loads(self.manifest_bytes)
         self.manifest_hash = hashlib.sha256(self.manifest_bytes).hexdigest()
         self.event_path = self.manifest_path.with_name(f"{self.manifest_path.stem}.{mode}.search.jsonl")
-        self.summary_path = self.manifest_path.with_name(f"{self.manifest_path.stem}.{mode}.summary.json")
+        payload_tag = "-".join(output_fields) if output_fields else ""
+        summary_name = ".".join(
+            [self.manifest_path.stem, mode] + ([payload_tag] if payload_tag else []) + ["summary.json"]
+        )
+        self.summary_path = self.manifest_path.with_name(summary_name)
         self._validate_manifest()
 
     def _validate_manifest(self) -> None:
@@ -549,6 +553,25 @@ class MultiTenantSearchRunner:
     def _events(self) -> list[dict[str, Any]]:
         if not self.event_path.exists():
             self._append_jsonl(self.event_path, self._header())
+        else:
+            with self.event_path.open() as source:
+                existing = [json.loads(line) for line in source if line.strip()]
+            if not existing or existing[0].get("event") != "header":
+                raise ValueError(f"invalid search checkpoint: {self.event_path}")
+            recorded = existing[0]
+            expected = self._header()
+            if recorded == expected:
+                pass
+            elif self._same_contract_different_payload(recorded, expected):
+                log.info(
+                    "Re-searching %s manifest with different output_fields: %s -> %s",
+                    self.mode,
+                    recorded.get("output_fields"),
+                    expected.get("output_fields"),
+                )
+                self._reset_events_file()
+            else:
+                raise ValueError(f"search checkpoint does not match this run: {self.event_path}")
         with self.event_path.open() as source:
             events = [json.loads(line) for line in source if line.strip()]
         if not events or events[0] != self._header():
@@ -562,6 +585,24 @@ class MultiTenantSearchRunner:
             ):
                 raise ValueError(f"invalid search checkpoint event: {self.event_path}")
         return events
+
+    @staticmethod
+    def _same_contract_different_payload(recorded: dict[str, Any], expected: dict[str, Any]) -> bool:
+        recorded_contract = {key: value for key, value in recorded.items() if key != "output_fields"}
+        expected_contract = {key: value for key, value in expected.items() if key != "output_fields"}
+        return recorded_contract == expected_contract and recorded.get("output_fields") != expected.get(
+            "output_fields"
+        )
+
+    def _reset_events_file(self) -> None:
+        path = self.event_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial = path.with_name(f"{path.name}.partial")
+        with partial.open("w") as output:
+            output.write(json.dumps(self._header(), separators=(",", ":")) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        partial.replace(path)
 
     @staticmethod
     def _states(events: list[dict[str, Any]]) -> dict[tuple[str, str, int], dict[str, Any]]:

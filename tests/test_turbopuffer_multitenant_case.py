@@ -161,6 +161,25 @@ def test_multitenant_search_uses_disable_cache_only_on_first_pass(tmp_path: Path
     ]
 
 
+def test_multitenant_search_reruns_same_manifest_with_new_payload(tmp_path: Path) -> None:
+    manifest = _write_manifest(tmp_path)
+    db = _SearchDB()
+
+    first = MultiTenantSearchRunner(db, manifest, "dense", output_fields=("vc_uuid",), top_k=10).run()
+    assert [namespace for namespace, _ in db.calls].count("run_1_01") == 4
+    assert first["status"] == "complete"
+    first_summary = Path(first["summary_path"])
+    assert first_summary.is_file()
+
+    second = MultiTenantSearchRunner(db, manifest, "dense", output_fields=("content",), top_k=10).run()
+    assert second["status"] == "complete"
+    assert [namespace for namespace, _ in db.calls].count("run_1_01") == 8  # all queries re-ran
+    assert Path(second["summary_path"]).is_file()
+    assert second["summary_path"] != first["summary_path"]
+    assert first_summary.is_file()  # prior payload summary preserved
+    assert second["first"]["cache_temperature"] == {"cold": 2}
+
+
 def test_multitenant_search_does_not_retry_and_preserves_failure_summary(tmp_path: Path) -> None:
     manifest = _write_manifest(tmp_path)
     db = _SearchDB({"run_1_01"})

@@ -521,11 +521,6 @@ class MultiTenantSearchRunner:
         if incomplete:
             raise ValueError(f"setup is incomplete for {len(incomplete)} namespaces")
 
-        other_mode = "bm25" if self.mode == "dense" else "dense"
-        other_events = self.manifest_path.with_name(f"{self.manifest_path.stem}.{other_mode}.search.jsonl")
-        if other_events.exists() and other_events.stat().st_size:
-            raise ValueError("dense and BM25 cold measurements require separate setup manifests")
-
     @property
     def checkpoint_path(self) -> Path:
         return self.manifest_path.parent / self.manifest["checkpoint_file"]

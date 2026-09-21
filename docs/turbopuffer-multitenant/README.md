@@ -90,33 +90,19 @@ Expected search summary values are `status=complete`, `rows_per_namespace=15000`
 
 ## BM25 run
 
-BM25 needs a fresh prefix and manifest (the runner enforces separate setup manifests per mode):
+BM25 can reuse the same manifest and namespace as dense — the cold pass is forced by `disable_cache`, so prior dense queries do not contaminate it, and no new setup is needed:
 
 ```bash
-export BM25_PREFIX=tp_mt_bm25_20260918
-export BM25_MANIFEST="$MULTITENANT_RUN_DIR/bm25.json"
-
-PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
-  --api-key "$TURBOPUFFER_API_KEY" \
-  --region "$TURBOPUFFER_REGION" \
-  --case-type TurboPufferMultiTenantColdStart \
-  --multitenant-operation setup \
-  --multitenant-manifest "$BM25_MANIFEST" \
-  --multitenant-prepared-data "$MULTITENANT_DATA" \
-  --multitenant-queries-file "$QUERIES_FILE" \
-  --multitenant-run-prefix "$BM25_PREFIX" \
-  --multitenant-namespace-rows 15000
-
 PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
   --api-key "$TURBOPUFFER_API_KEY" \
   --region "$TURBOPUFFER_REGION" \
   --case-type TurboPufferMultiTenantColdStart \
   --multitenant-operation bm25 \
-  --multitenant-manifest "$BM25_MANIFEST" \
+  --multitenant-manifest "$DENSE_MANIFEST" \
   --k 100
 ```
 
-Expected BM25 search summary values are `status=complete`, `rows_per_namespace=15000`, and `search_field=content`. For a multi-size comparison, repeat setup + search for each size with a fresh prefix and manifest.
+Expected BM25 search summary values are `status=complete`, `rows_per_namespace=15000`, and `search_field=content`. For a multi-size comparison, run BM25 on the same manifests as the dense runs (no new setup).
 
 ## Search fields and returned attributes
 

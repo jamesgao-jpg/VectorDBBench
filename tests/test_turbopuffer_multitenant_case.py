@@ -269,13 +269,20 @@ def test_multitenant_search_resumes_repeat_that_never_started(tmp_path: Path) ->
     assert summary["status"] == "complete"
 
 
-def test_multitenant_search_requires_fresh_manifest_for_each_mode(tmp_path: Path) -> None:
+def test_multitenant_search_both_modes_share_one_manifest(tmp_path: Path) -> None:
     manifest = _write_manifest(tmp_path)
-    dense = MultiTenantSearchRunner(_SearchDB(), manifest, "dense")
-    dense._events()
+    dense = MultiTenantSearchRunner(_SearchDB(), manifest, "dense").run()
+    assert dense["status"] == "complete"
 
-    with pytest.raises(ValueError, match="require separate setup manifests"):
-        MultiTenantSearchRunner(_SearchDB(), manifest, "bm25")
+    db = _SearchDB()
+    bm25 = MultiTenantSearchRunner(db, manifest, "bm25").run()
+    assert bm25["status"] == "complete"
+    assert [(call.mode, call.disable_cache) for _, call in db.calls] == [
+        ("bm25", True),
+        ("bm25", True),
+        ("bm25", False),
+        ("bm25", False),
+    ]
 
 
 def test_multitenant_case_and_cli_config() -> None:

@@ -7,13 +7,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from vectordb_bench.backend.turbopuffer_multitenant import (
-    NAMESPACE_PROFILE_COUNTS,
     PREPARED_SCHEMA,
     MultiTenantSetupRunner,
     NamespaceGroup,
     PreparedMultiTenantDataset,
-    namespace_groups,
-    namespace_profile,
+    namespace_group,
 )
 
 
@@ -55,6 +53,10 @@ def _write_queries(path: Path, count: int = 3) -> None:
             }
         )
     )
+
+
+def _group() -> NamespaceGroup:
+    return NamespaceGroup("2", 2, 1, 2)
 
 
 class _FakeDB:
@@ -109,40 +111,28 @@ class _FakeDB:
         return len(rows), None
 
 
-def _groups() -> tuple[NamespaceGroup, ...]:
-    return (
-        NamespaceGroup("A", "2", 2, 2, 2),
-        NamespaceGroup("B", "4", 4, 1, 2),
-    )
+def test_namespace_group_defaults_and_validation() -> None:
+    group = namespace_group()
+    assert group.suffix == "15000"
+    assert group.rows_per_namespace == 15_000
+    assert group.namespace_count == 1
+    assert group.id_width == 4
+    assert group.source_rows == 15_000
 
+    small = namespace_group(rows_per_namespace=2)
+    assert small.suffix == "2"
+    assert small.source_rows == 2
 
-def test_namespace_profiles_keep_row_shapes_and_bound_source_rows() -> None:
-    expected_counts = {"small": 20, "medium": 100, "large": 300}
-
-    assert NAMESPACE_PROFILE_COUNTS == expected_counts
-    for profile, count in expected_counts.items():
-        groups = namespace_groups(profile)
-        assert [group.rows_per_namespace for group in groups] == [1_000, 3_000, 15_000, 5_000_000]
-        assert [group.namespace_count for group in groups] == [count, count, count, 1]
-        assert max(group.source_rows for group in groups) <= 5_000_000
-        assert namespace_profile(groups) == profile
-
-        no_5m = namespace_groups(profile, include_5m=False)
-        assert [group.key for group in no_5m] == ["A", "B", "C"]
-        assert [group.rows_per_namespace for group in no_5m] == [1_000, 3_000, 15_000]
-        assert [group.namespace_count for group in no_5m] == [count, count, count]
-        assert namespace_profile(no_5m) == f"{profile}-no-5m"
-
-    with pytest.raises(ValueError, match="small, medium, or large"):
-        namespace_groups("unknown")
+    with pytest.raises(ValueError, match="rows_per_namespace must be positive"):
+        namespace_group(rows_per_namespace=0)
 
 
 def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
-    _write_prepared(prepared)
+    _write_prepared(prepared, rows=2)
     queries = tmp_path / "queries.json"
     _write_queries(queries, count=2)
-    dataset = PreparedMultiTenantDataset(prepared, _groups())
+    dataset = PreparedMultiTenantDataset(prepared, _group())
     db = _FakeDB()
     manifest = tmp_path / "setup.json"
     runner = MultiTenantSetupRunner(
@@ -151,22 +141,22 @@ def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path:
 
     summary = runner.run()
 
-    assert summary["inserted_rows"] == 8
-    assert summary["profile"] == "custom"
-    assert summary["total_rows"] == 8
-    assert summary["completed_namespaces"] == 3
+    assert summary["inserted_rows"] == 2
+    assert summary["rows_per_namespace"] == 2
+    assert summary["total_rows"] == 2
+    assert summary["completed_namespaces"] == 1
     assert summary["queries"] == 2
     assert list(db.rows["run_2_01"]) == [0, 1]
-    assert list(db.rows["run_2_02"]) == [2, 3]
-    assert list(db.rows["run_4_01"]) == [0, 1, 2, 3]
     manifest_data = json.loads(manifest.read_text())
-    assert manifest_data["version"] == 5
-    assert len(manifest_data["namespaces"]) == 3
-    assert manifest_data["profile"] == "custom"
+    assert manifest_data["version"] == 7
+    assert len(manifest_data["namespaces"]) == 1
+    assert manifest_data["rows_per_namespace"] == 2
+    assert "namespace_count" not in manifest_data
     assert manifest_data["search_fields"] == {"dense": "emb_768", "bm25": "content"}
     assert manifest_data["queries_file"] == "setup.queries.json"
     assert manifest_data["query_count"] == 2
-    assert sorted(manifest_data["search_order"]) == ["run_2_01", "run_2_02", "run_4_01"]
+    assert sorted(manifest_data["search_order"]) == ["run_2_01"]
+    assert all("group" not in entry for entry in manifest_data["namespaces"])
     queries_sidecar = json.loads((tmp_path / "setup.queries.json").read_text())
     assert queries_sidecar["count"] == 2
     assert queries_sidecar["queries"][0]["dense"][0] == 100.0
@@ -175,7 +165,7 @@ def test_setup_partitions_reused_rows_and_resumes_completed_namespaces(tmp_path:
     calls_before_resume = db.insert_calls
     resumed = runner.run()
     assert resumed["inserted_rows"] == 0
-    assert resumed["completed_namespaces"] == 3
+    assert resumed["completed_namespaces"] == 1
     assert db.insert_calls == calls_before_resume
 
 
@@ -189,7 +179,7 @@ def test_setup_can_select_the_manifest_bm25_field(tmp_path: Path) -> None:
 
     MultiTenantSetupRunner(
         db,
-        PreparedMultiTenantDataset(prepared, (NamespaceGroup("A", "2", 2, 1, 2),)),
+        PreparedMultiTenantDataset(prepared, NamespaceGroup("2", 2, 1, 2)),
         manifest,
         "run",
         queries_file=queries,
@@ -207,7 +197,7 @@ def test_setup_resumes_started_namespace_with_idempotent_ids(tmp_path: Path) -> 
     _write_prepared(prepared, rows=2)
     queries = tmp_path / "queries.json"
     _write_queries(queries, count=2)
-    group = (NamespaceGroup("A", "2", 2, 1, 2),)
+    group = NamespaceGroup("2", 2, 1, 2)
     dataset = PreparedMultiTenantDataset(prepared, group)
     db = _FakeDB()
     db.fail_once_for = "run_2_01"
@@ -236,7 +226,7 @@ def test_setup_refuses_untracked_existing_namespace(tmp_path: Path) -> None:
     _write_prepared(prepared, rows=2)
     queries = tmp_path / "queries.json"
     _write_queries(queries, count=2)
-    group = (NamespaceGroup("A", "2", 2, 1, 2),)
+    group = NamespaceGroup("2", 2, 1, 2)
     db = _FakeDB()
     db.rows["run_2_01"] = {}
     runner = MultiTenantSetupRunner(
@@ -254,12 +244,12 @@ def test_setup_refuses_untracked_existing_namespace(tmp_path: Path) -> None:
 
 def test_setup_requires_a_queries_file(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
-    _write_prepared(prepared, rows=5)
+    _write_prepared(prepared, rows=2)
 
     with pytest.raises(ValueError, match="requires a shared queries file"):
         MultiTenantSetupRunner(
             _FakeDB(),
-            PreparedMultiTenantDataset(prepared, _groups()),
+            PreparedMultiTenantDataset(prepared, _group()),
             tmp_path / "setup.json",
             "run",
         )
@@ -267,7 +257,7 @@ def test_setup_requires_a_queries_file(tmp_path: Path) -> None:
 
 def test_setup_rejects_invalid_queries_file(tmp_path: Path) -> None:
     prepared = tmp_path / "prepared.parquet"
-    _write_prepared(prepared, rows=5)
+    _write_prepared(prepared, rows=2)
     queries = tmp_path / "queries.json"
     _write_queries(queries, count=2)
     bad = tmp_path / "bad.json"
@@ -286,7 +276,7 @@ def test_setup_rejects_invalid_queries_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="invalid query entry"):
         MultiTenantSetupRunner(
             _FakeDB(),
-            PreparedMultiTenantDataset(prepared, _groups()),
+            PreparedMultiTenantDataset(prepared, _group()),
             tmp_path / "setup.json",
             "run",
             queries_file=bad,

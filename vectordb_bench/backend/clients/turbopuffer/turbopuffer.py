@@ -554,6 +554,8 @@ class TurboPuffer(VectorDB):
             query_kwargs["filters"] = self.expr
         if request.include_fields:
             query_kwargs["include_attributes"] = list(request.include_fields)
+        if request.disable_cache:
+            query_kwargs["extra_body"] = {"disable_cache": True}
 
         namespace = self.ns if tenant is None else self._namespace_for_tenant(tenant)
         response = namespace.query(**query_kwargs)

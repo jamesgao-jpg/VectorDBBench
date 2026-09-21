@@ -52,6 +52,7 @@ class CustomizedRequest:
     value: Sequence[float] | str
     top_k: int = 100
     include_fields: tuple[str, ...] = ()
+    disable_cache: bool = False
 
     def __post_init__(self) -> None:
         if self.mode not in {"dense", "bm25"}:

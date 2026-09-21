@@ -107,6 +107,27 @@ def test_turbopuffer_searches_dense_and_bm25_with_performance() -> None:
     assert results[1].performance.server_total_ms == 12.0
 
 
+def test_turbopuffer_search_sends_disable_cache_extra_body() -> None:
+    class Namespace:
+        calls = []
+
+        def query(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(rows=[], performance=None)
+
+    namespace = Namespace()
+    db = _db(namespace)
+    db.search_customized_queries(
+        [
+            CustomizedRequest("dense", "emb_768", [0.0] * 768),
+            CustomizedRequest("dense", "emb_768", [0.0] * 768, disable_cache=True),
+        ]
+    )
+
+    assert "extra_body" not in namespace.calls[0]
+    assert namespace.calls[1]["extra_body"] == {"disable_cache": True}
+
+
 def test_search_documents_accepts_customized_text_field() -> None:
     class Namespace:
         kwargs = None

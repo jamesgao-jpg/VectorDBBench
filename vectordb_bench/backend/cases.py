@@ -766,10 +766,8 @@ class TurboPufferMultiTenantColdStartCase(Case):
     run_prefix: str | None = None
     dense_field: str = "emb_768"
     bm25_field: str = "content"
-    profile: str | None = None
-    exclude_5m: bool = False
+    namespace_rows: int = 15_000
     queries_file: str | None = None
-    group: str = "all"
     output_fields: tuple[str, ...] = ()
 
     def __init__(
@@ -780,15 +778,12 @@ class TurboPufferMultiTenantColdStartCase(Case):
         run_prefix: str | None = None,
         dense_field: str = "emb_768",
         bm25_field: str = "content",
-        profile: str | None = None,
-        exclude_5m: bool = False,
+        namespace_rows: int = 15_000,
         queries_file: str | None = None,
-        group: str = "all",
         output_fields: tuple[str, ...] | list[str] = (),
         **kwargs,
     ):
         operation = operation.lower()
-        group = group if group == "all" else group.upper()
         output_fields = tuple(output_fields)
         if operation not in {"setup", "dense", "bm25"}:
             raise ValueError("operation must be setup, dense, or bm25")
@@ -797,21 +792,14 @@ class TurboPufferMultiTenantColdStartCase(Case):
         if operation == "setup" and (not prepared_data or not run_prefix):
             raise ValueError("setup requires prepared_data and run_prefix")
         if operation == "setup":
-            profile = profile or "medium"
-            if profile not in {"small", "medium", "large"}:
-                raise ValueError("profile must be small, medium, or large")
+            if namespace_rows <= 0:
+                raise ValueError("namespace_rows must be positive")
             if not queries_file:
                 raise ValueError("setup requires queries_file")
-        elif profile is not None:
-            raise ValueError("profile applies only to the setup operation")
-        elif exclude_5m:
-            raise ValueError("exclude_5m applies only to the setup operation")
+        elif namespace_rows != 15_000:
+            raise ValueError("namespace_rows applies only to the setup operation")
         elif queries_file is not None:
             raise ValueError("queries_file applies only to the setup operation")
-        if group not in {"all", "A", "B", "C", "D"}:
-            raise ValueError("group must be all, A, B, C, or D")
-        if operation == "setup" and group != "all":
-            raise ValueError("setup always creates all namespace groups")
         if operation == "setup" and output_fields:
             raise ValueError("output_fields apply only to dense and bm25 operations")
         if len(set(output_fields)) != len(output_fields) or "id" in output_fields:
@@ -830,8 +818,11 @@ class TurboPufferMultiTenantColdStartCase(Case):
             train_file=data_path.stem,
         )
         super().__init__(
-            name=f"Turbopuffer Multi-Tenant {operation.title()} ({group})",
-            description="Sequential first-query and repeat-query latency across turbopuffer namespaces.",
+            name=f"Turbopuffer Multi-Tenant {operation.title()}",
+            description=(
+                "Sequential first-query (cache disabled) and repeat-query latency "
+                "across turbopuffer namespaces."
+            ),
             dataset=ParquetDatasetManager(data=dataset),
             operation=operation,
             manifest_path=manifest_path,
@@ -839,10 +830,8 @@ class TurboPufferMultiTenantColdStartCase(Case):
             run_prefix=run_prefix,
             dense_field=dense_field,
             bm25_field=bm25_field,
-            profile=profile,
-            exclude_5m=exclude_5m,
+            namespace_rows=namespace_rows,
             queries_file=queries_file,
-            group=group,
             output_fields=output_fields,
             **kwargs,
         )

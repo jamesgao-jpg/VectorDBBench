@@ -222,7 +222,6 @@ def get_custom_case_config(parameters: dict) -> dict:
         custom_case_config = {
             "operation": operation,
             "manifest_path": manifest,
-            "group": parameters.get("multitenant_group", "all"),
             "output_fields": parameters.get("multitenant_output_fields", []),
         }
         if operation == "setup":
@@ -232,8 +231,7 @@ def get_custom_case_config(parameters: dict) -> dict:
                     "run_prefix": parameters.get("multitenant_run_prefix"),
                     "dense_field": parameters.get("multitenant_dense_field", "emb_768"),
                     "bm25_field": parameters.get("multitenant_bm25_field", "content"),
-                    "profile": parameters.get("multitenant_profile", "medium"),
-                    "exclude_5m": parameters.get("multitenant_exclude_5m", False),
+                    "namespace_rows": parameters.get("multitenant_namespace_rows", 15_000),
                     "queries_file": parameters.get("multitenant_queries_file"),
                 }
             )

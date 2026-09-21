@@ -197,23 +197,14 @@ class TurboPufferTypedDict(TypedDict):
             help="Full-text field indexed and recorded in the setup manifest",
         ),
     ]
-    multitenant_profile: Annotated[
-        str,
+    multitenant_namespace_rows: Annotated[
+        int,
         click.option(
-            "--multitenant-profile",
-            type=click.Choice(["small", "medium", "large"]),
-            default="medium",
+            "--multitenant-namespace-rows",
+            type=click.IntRange(min=1),
+            default=15_000,
             show_default=True,
-            help="Namespace-count profile used by the setup operation",
-        ),
-    ]
-    multitenant_exclude_5m: Annotated[
-        bool,
-        click.option(
-            "--multitenant-exclude-5m",
-            is_flag=True,
-            default=False,
-            help="Skip the 5M-row D namespace during the setup operation",
+            help="Rows for the single namespace created by the setup operation",
         ),
     ]
     multitenant_queries_file: Annotated[
@@ -223,16 +214,6 @@ class TurboPufferTypedDict(TypedDict):
             type=click.Path(dir_okay=False),
             default=None,
             help="Shared out-of-sample query JSON used by the setup operation",
-        ),
-    ]
-    multitenant_group: Annotated[
-        str,
-        click.option(
-            "--multitenant-group",
-            type=click.Choice(["all", "A", "B", "C", "D"]),
-            default="all",
-            show_default=True,
-            help="Namespace-size group measured by dense or BM25 operations",
         ),
     ]
     multitenant_output_fields: Annotated[

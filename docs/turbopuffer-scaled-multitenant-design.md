@@ -57,7 +57,7 @@ Validate the projected schema, 768-dimensional finite vectors, JSON-object field
 
 The inspected `$meta` column is a required Arrow string. All 500,000 rows parse as JSON objects; their values use five stable keys (`dyn_extra_a`, `dyn_extra_b`, `dyn_extra_c`, `dyn_source`, and `dyn_version`) with string values. Turbopuffer attribute names cannot start with `$`, and its documented schema has no general JSON-object type. Preserve the source string unchanged in a non-filterable `meta_json` string attribute and record the `$meta` → `meta_json` mapping in the manifest. Do not expand the keys, because expansion would change one source field into five nullable fields. [Turbopuffer attributes](https://turbopuffer.com/docs/write#attributes).
 
-During setup, reuse the prepared file from the beginning for each group. For a profile count `N`, A consumes `N × 1K` rows, B consumes `N × 3K`, C consumes `N × 15K`, and D consumes all 5M rows. Large therefore needs at most 4.5M source rows for C, so the existing prepared file covers every profile. Write a static manifest containing the profile, run prefix, namespace names, group, expected row counts, prepared-file ranges, schema version, the shared queries file and count, and a deterministic search order. Record `started` and `completed` events in an append-only checkpoint file, and copy the shared query set into an atomic `<manifest>.queries.json` sidecar.
+Each setup run creates exactly one namespace of `--multitenant-namespace-rows` rows (default 15000), sliced from row zero of the prepared 5M-row file, so a single setup run needs at most `rows ≤ 5M`. Run setup once per size (e.g. 1K, 10K, 15K, 5M), each with a fresh prefix and manifest. The namespace is named `{run_prefix}_{rows}_0001` (size embedded in the name). Write a static manifest (version 7) containing the run prefix, rows-per-namespace, namespace name and prepared-file range, schema version, the shared queries file and count, and a deterministic search order. Record `started` and `completed` events in an append-only checkpoint file, and copy the shared query set into an atomic `<manifest>.queries.json` sidecar.
 
 Prepare the file on the remote client after configuring its standard AWS credential chain:
 
@@ -74,14 +74,14 @@ Successful output is a JSON summary with `output_rows` equal to `5000000`. The c
 
 Register one case type: `TurboPufferMultiTenantColdStart`. Separate invocations select `setup`, `dense`, or `bm25`. Hybrid search and explicit sparse-vector `SparseKNN` are outside the first version.
 
-The setup operation loads the selected profile without issuing search queries. It also records one shared out-of-sample query set (100 dense vectors plus their BM25 text, extracted from a wide-table Parquet that was NOT used to build the prepared insert file) into the manifest and a `<manifest>.queries.json` sidecar. Dense and BM25 operations use the completed setup manifest and query the selected distribution (`all`, `A`, `B`, `C`, or `D`) sequentially:
+The setup operation loads the namespaces without issuing search queries. It also records one shared out-of-sample query set (100 dense vectors plus their BM25 text, extracted from a wide-table Parquet that was NOT used to build the prepared insert file) into the manifest and a `<manifest>.queries.json` sidecar. Dense and BM25 operations use the completed setup manifest and query every namespace in deterministic manifest order:
 
 1. Bind a turbopuffer client to one namespace from the manifest.
-2. Run all 100 shared queries in pass `first`; query 0 of that pass is the namespace's cold sample, queries 1-99 are the warm-up ramp.
-3. Run all 100 shared queries again in pass `repeat` while the namespace is warm.
+2. Run all 100 shared queries in pass `first`, each with turbopuffer's `disable_cache` query flag — every first-pass query is a genuinely cold, uncached read.
+3. Run all 100 shared queries again in pass `repeat` without the flag — the warm pass over the same 100 queries.
 4. Continue to the next namespace with no concurrent requests.
 
-No tenant argument is required because the runner selects one namespace before issuing each `CustomizedRequest`. Aggregate the samples by the namespace's row-count group: the `cold` bucket contains each namespace's query 0 of pass `first`, and the `warm` bucket contains all 100 queries of pass `repeat`, so A/B/C provide cold and warm latency distributions. Group D has one namespace and therefore produces an individual observation rather than a percentile distribution.
+No tenant argument is required because the runner selects one namespace before issuing each `CustomizedRequest`. The `first` bucket contains every first-pass query (cold) and the `repeat` bucket contains every repeat query (warm), so each namespace contributes a full cold and warm latency distribution over identical queries.
 
 Use a deterministic permutation of namespaces, stored in the manifest, so groups are interleaved and repeated runs are comparable. Do not insert an artificial one-second delay; the experiment is serial because only one request is in flight.
 
@@ -91,17 +91,15 @@ For `bm25`, issue customized BM25 requests with the shared query set's text and 
 
 The setup manifest stores the authoritative dense and BM25 field names. `--multitenant-dense-field` and `--multitenant-bm25-field` apply only to setup. Search invocations read those names from the manifest. `--multitenant-output-fields` optionally requests comma-separated declared attributes such as `vc_uuid,vc_tag`; returned values are validated and discarded, while only counts, timing, and cache metadata are persisted.
 
-Run dense and BM25 as separate benchmark invocations. A query of either type can warm namespace data, so both modes cannot claim a cold pass against the same already-queried prefix. Give each mode a fresh namespace prefix, or explicitly label the second mode as an after-prior-query experiment.
+Run dense and BM25 as separate benchmark invocations with separate setup manifests (the runner rejects a manifest already measured by the other mode). The `disable_cache` flag forces cold regardless of prior query activity, so no idle wait is needed between setup and search.
 
-Before every measured query, append a `started` event to the mode-specific JSONL artifact. Append `completed` or `error` after the call. Record client latency, `cache_hit_ratio`, `cache_temperature`, `server_total_ms`, `query_execution_ms`, namespace group, namespace name, query mode, pass, query index, result count, and error type. Do not persist query vectors, query text, returned IDs, returned attribute values, or exception messages. Do not retry a measured query in either VDBBench or the SDK. [Turbopuffer query response](https://turbopuffer.com/docs/query).
+Before every measured query, append a `started` event to the mode-specific JSONL artifact. Append `completed` or `error` after the call. Record client latency, `cache_hit_ratio`, `cache_temperature`, `server_total_ms`, `query_execution_ms`, namespace name, query mode, pass, query index, result count, and error type. Do not persist query vectors, query text, returned IDs, returned attribute values, or exception messages. Do not retry a measured query in either VDBBench or the SDK. [Turbopuffer query response](https://turbopuffer.com/docs/query).
 
 On resume, a `started` event without a terminal event becomes `indeterminate` and is never rerun. A repeat query with no `started` event after a completed first query is safe to run. A failed or indeterminate first query causes its repeat to be marked `skipped`. Query failures do not stop collection for later namespaces, but the invocation exits as incomplete after writing the summary.
 
-The compact summary reports outcomes plus client, server-total, and query-execution min/max/average/P50/P95/P99 for each group's `cold` (query 0 of pass `first`, one genuinely-cold sample per namespace), `first` (the full cold pass), and `repeat` (the warm pass) buckets. Only query 0 of pass `first` is truly cold; the remaining first-pass queries and all repeat queries run against the warmed namespace, so the cold signal appears in the `cold` bucket and in the `first` bucket's max/P99 rather than its P50. It also points to the raw JSONL event artifact. Group-specific invocations share the mode-specific event file, so completed namespace samples remain resumable across `A`/`B`/`C`/`D` runs.
+The compact summary reports outcomes plus client, server-total, and query-execution min/max/average/P50/P95/P99, `cache_temperature` counts, and `cache_hit_ratio` stats for the `first` (cold pass, `disable_cache: true`) and `repeat` (warm pass) buckets, plus top-level `cache_temperature`/`cache_hit_ratio` aggregates, `rows_per_namespace`, and `total_rows`. With one namespace per setup run, each run's summary is already per-size; combine summaries across runs for the size comparison. Every event's cache cold/warmness is classified strictly from turbopuffer's reported `cache_temperature`/`cache_hit_ratio` (task policy in AGENTS.md); latency metrics are recorded but never used to label cache state. The summary also points to the raw JSONL event artifact, which all invocations share so resume never reclassifies a completed query.
 
-Turbopuffer has no public cache-eviction/release operation (the complete namespace API is query, write, schema, metadata, `hint_cache_warm`, `explain_query`, delete, exists, branch_from, copy_from, recall): `hint_cache_warm` and namespace pinning only warm ([warm-cache docs](https://turbopuffer.com/docs/warm-cache), [pinning docs](https://turbopuffer.com/docs/pinning)). Unpinning a pinned namespace (`metadata.pinning: null`) releases its reserved replicas/SSD — the only client-side 'release' lever — but eviction from the shared multi-tenant cache is still service-managed and requires idle time. A namespace becomes cold only when the service evicts it while idle. Empirically (Small no-5m namespaces, ~380K rows total), namespaces idle at least ~1.5 hours pay a one-time 58-96 ms `server_total_ms` on their first query versus 10-20 ms warm, i.e. a 4-6x cold/warm ratio. The returned `cache_temperature`/`cache_hit_ratio` are NOT a reliable cold indicator: they report `hot`/`1.0` even on the first query that pays the eviction-load cost, so use `server_total_ms` (or client latency) as the cold discriminator and wait after setup before searching. [Warm-cache API](https://turbopuffer.com/docs/warm-cache).
-
-Rerunning a true cold pass requires a new namespace prefix and an idle wait long enough for eviction. Search-only reruns against the same prefix are repeat-query measurements.
+Turbopuffer honors an undocumented per-query `disable_cache` request-body flag (verified 2026-09-18 for this account; not in the public SDKs or docs). Flagged queries report `cache_temperature="cold"`/`cache_hit_ratio=0.0` and pay the uncached-read cost; un-flagged queries run warm (`hot`/1.0). At equal namespace size the flagged cold latency matches a fresh `branch_from` clone's first query (511 vs 525 ms @ 15K rows), so the flag replaces both the idle-eviction wait (whose samples reported `hot`/1.0 and could not be labeled cold under the policy) and the branch_from approach (issue #2, closed). The internal `_debug/purge_cache`/`_debug/warm_cache` endpoints return 200 for this account but purge has no observable effect — do not rely on them. Cold/warm classification follows the task policy in AGENTS.md: turbopuffer's `cache_temperature`/`cache_hit_ratio` are the SOLE indicators of cache cold/warmness; `server_total_ms`, `query_execution_ms`, and client latency are recorded metrics only and must not label cache state. [Warm-cache API](https://turbopuffer.com/docs/warm-cache).
 
 ### CLI
 
@@ -115,11 +113,12 @@ PYTHONPATH=/home/ubuntu/VectorDBBench-stage1-test \
   --multitenant-operation setup \
   --multitenant-manifest /home/ubuntu/vdbbench-data-inspect/dense-setup.json \
   --multitenant-prepared-data /home/ubuntu/vdbbench-data-inspect/turbopuffer_multitenant_5m.parquet \
-  --multitenant-profile medium \
+  --multitenant-namespace-rows 15000 \
+  --multitenant-queries-file /home/ubuntu/vdbbench-data-inspect/turbopuffer-queries/queries.json \
   --multitenant-run-prefix multi_tenant_dense
 ```
 
-Measure all distributions or one selected group:
+Measure every namespace:
 
 ```bash
 PYTHONPATH=/home/ubuntu/VectorDBBench-stage1-test \
@@ -128,10 +127,10 @@ PYTHONPATH=/home/ubuntu/VectorDBBench-stage1-test \
   --case-type TurboPufferMultiTenantColdStart \
   --multitenant-operation dense \
   --multitenant-manifest /home/ubuntu/vdbbench-data-inspect/dense-setup.json \
-  --multitenant-group all --k 100
+  --k 100
 ```
 
-BM25 requires a separately prepared namespace prefix and manifest if its first pass is to be described as cold. Replace `dense` with `bm25` and optionally add `--multitenant-output-fields vc_uuid,vc_tag`. Setup always creates all four distributions; `--multitenant-group` controls only the search runtime.
+BM25 requires a separately prepared namespace prefix and manifest (the runner enforces separate manifests per mode). Replace `dense` with `bm25` and optionally add `--multitenant-output-fields vc_uuid,vc_tag`.
 
 See the [run README](turbopuffer-multitenant/README.md) for complete commands, artifact names, resume behavior, and result interpretation.
 

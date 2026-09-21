@@ -20,11 +20,12 @@ from vectordb_bench.backend.customized import CustomizedRequest, CustomizedRow, 
 
 log = logging.getLogger(__name__)
 
-MANIFEST_VERSION = 5
+MANIFEST_VERSION = 7
 SEARCH_RESULT_VERSION = 1
 SEARCH_ORDER_SEED = 20260914
 QUERIES_FILE_VERSION = 1
-NAMESPACE_PROFILE_COUNTS = {"small": 20, "medium": 100, "large": 300}
+DEFAULT_NAMESPACE_ROWS = 15_000
+NAMESPACE_ID_WIDTH = 4
 
 SOURCE_FIELDS = (
     pa.field("emb_768", pa.list_(pa.float32()), nullable=False),
@@ -95,15 +96,14 @@ def customized_schema(dense_field: str, bm25_field: str) -> dict[str, FieldSchem
 
 @dataclass(frozen=True)
 class NamespaceGroup:
-    key: str
     suffix: str
     rows_per_namespace: int
     namespace_count: int
     id_width: int
 
     def __post_init__(self) -> None:
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", self.key) or not re.fullmatch(r"[A-Za-z0-9_-]+", self.suffix):
-            raise ValueError("namespace group key and suffix must contain only letters, numbers, '_' or '-'")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", self.suffix):
+            raise ValueError("namespace group suffix must contain only letters, numbers, '_' or '-'")
         if min(self.rows_per_namespace, self.namespace_count, self.id_width) <= 0:
             raise ValueError("namespace group sizes and id_width must be positive")
 
@@ -112,31 +112,13 @@ class NamespaceGroup:
         return self.rows_per_namespace * self.namespace_count
 
 
-def namespace_groups(profile: str, *, include_5m: bool = True) -> tuple[NamespaceGroup, ...]:
-    try:
-        namespace_count = NAMESPACE_PROFILE_COUNTS[profile]
-    except KeyError as error:
-        raise ValueError("namespace profile must be small, medium, or large") from error
-    groups = [
-        NamespaceGroup("A", "1000", 1_000, namespace_count, 4),
-        NamespaceGroup("B", "3000", 3_000, namespace_count, 4),
-        NamespaceGroup("C", "15000", 15_000, namespace_count, 3),
-    ]
-    if include_5m:
-        groups.append(NamespaceGroup("D", "5m", 5_000_000, 1, 7))
-    return tuple(groups)
+def namespace_group(rows_per_namespace: int = DEFAULT_NAMESPACE_ROWS) -> NamespaceGroup:
+    if rows_per_namespace <= 0:
+        raise ValueError("rows_per_namespace must be positive")
+    return NamespaceGroup(str(rows_per_namespace), rows_per_namespace, 1, NAMESPACE_ID_WIDTH)
 
 
-DEFAULT_NAMESPACE_GROUPS = namespace_groups("medium")
-
-
-def namespace_profile(groups: tuple[NamespaceGroup, ...]) -> str:
-    for profile in NAMESPACE_PROFILE_COUNTS:
-        if groups == namespace_groups(profile):
-            return profile
-        if groups == namespace_groups(profile, include_5m=False):
-            return f"{profile}-no-5m"
-    return "custom"
+DEFAULT_NAMESPACE_GROUP = namespace_group()
 
 
 @dataclass(frozen=True)
@@ -180,7 +162,6 @@ def load_queries_file(path: Path) -> list[SearchQuery]:
 @dataclass(frozen=True)
 class NamespaceSpec:
     name: str
-    group: str
     rows: int
     source_start: int
     source_end: int
@@ -205,52 +186,45 @@ class NamespaceBatch:
 
 
 class PreparedMultiTenantDataset:
-    def __init__(self, path: Path, groups: tuple[NamespaceGroup, ...] = DEFAULT_NAMESPACE_GROUPS):
+    def __init__(self, path: Path, group: NamespaceGroup = DEFAULT_NAMESPACE_GROUP):
         self.path = path.resolve()
-        self.groups = groups
+        self.group = group
         if not self.path.is_file():
             raise FileNotFoundError(f"prepared Parquet does not exist: {self.path}")
-        if len({group.key for group in groups}) != len(groups):
-            raise ValueError("namespace group keys must be unique")
         parquet_file = pq.ParquetFile(self.path, memory_map=True, pre_buffer=False)
         if parquet_file.schema_arrow != PREPARED_SCHEMA:
             raise ValueError("prepared Parquet schema does not match the turbopuffer multi-tenant contract")
         self.row_count = parquet_file.metadata.num_rows
-        required_rows = max((group.source_rows for group in groups), default=0)
-        if self.row_count < required_rows:
-            raise ValueError(f"prepared Parquet has {self.row_count} rows, but the setup requires {required_rows}")
+        if self.row_count < group.source_rows:
+            raise ValueError(
+                f"prepared Parquet has {self.row_count} rows, but the setup requires {group.source_rows}"
+            )
 
     @staticmethod
     def namespace_name(run_prefix: str, group: NamespaceGroup, ordinal: int) -> str:
         return f"{run_prefix}_{group.suffix}_{ordinal:0{group.id_width}d}"
 
     def namespace_specs(self, run_prefix: str) -> list[NamespaceSpec]:
-        specs = []
-        for group in self.groups:
-            for ordinal in range(1, group.namespace_count + 1):
-                start = (ordinal - 1) * group.rows_per_namespace
-                name = self.namespace_name(run_prefix, group, ordinal)
-                specs.append(
-                    NamespaceSpec(
-                        name=name,
-                        group=group.key,
-                        rows=group.rows_per_namespace,
-                        source_start=start,
-                        source_end=start + group.rows_per_namespace,
-                    )
-                )
-        return specs
+        group = self.group
+        return [
+            NamespaceSpec(
+                name=self.namespace_name(run_prefix, group, ordinal),
+                rows=group.rows_per_namespace,
+                source_start=(ordinal - 1) * group.rows_per_namespace,
+                source_end=ordinal * group.rows_per_namespace,
+            )
+            for ordinal in range(1, group.namespace_count + 1)
+        ]
 
-    def iter_group_batches(
+    def iter_batches(
         self,
         run_prefix: str,
-        group: NamespaceGroup,
         batch_size: int,
     ):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
+        group = self.group
         specs = self.namespace_specs(run_prefix)
-        group_specs = [spec for spec in specs if spec.group == group.key]
         parquet_file = pq.ParquetFile(self.path, memory_map=True, pre_buffer=True)
         consumed = 0
         for batch in parquet_file.iter_batches(batch_size=batch_size, columns=PREPARED_SCHEMA.names):
@@ -264,7 +238,7 @@ class PreparedMultiTenantDataset:
                 rows_in_namespace = consumed % group.rows_per_namespace
                 take = min(batch.num_rows - offset, group.rows_per_namespace - rows_in_namespace)
                 yield NamespaceBatch(
-                    namespace=group_specs[namespace_index],
+                    namespace=specs[namespace_index],
                     record_batch=batch.slice(offset, take),
                     first=rows_in_namespace == 0,
                     last=rows_in_namespace + take == group.rows_per_namespace,
@@ -272,7 +246,7 @@ class PreparedMultiTenantDataset:
                 consumed += take
                 offset += take
         if consumed != group.source_rows:
-            raise ValueError(f"read {consumed} rows for group {group.key}, expected {group.source_rows}")
+            raise ValueError(f"read {consumed} rows, expected {group.source_rows}")
 
 
 class MultiTenantSetupRunner:
@@ -298,7 +272,7 @@ class MultiTenantSetupRunner:
             raise ValueError("setup requires a shared queries file")
         self.db = db
         self.dataset = dataset
-        self.profile = namespace_profile(dataset.groups)
+        self.group = dataset.group
         self.manifest_path = manifest_path.resolve()
         self.run_prefix = run_prefix
         self.dense_field = dense_field
@@ -346,8 +320,8 @@ class MultiTenantSetupRunner:
         random.Random(SEARCH_ORDER_SEED).shuffle(search_order)
         return {
             "version": MANIFEST_VERSION,
-            "profile": self.profile,
             "run_prefix": self.run_prefix,
+            "rows_per_namespace": self.group.rows_per_namespace,
             "prepared_data": str(self.dataset.path),
             "prepared_rows": self.dataset.row_count,
             "prepared_size_bytes": self.dataset.path.stat().st_size,
@@ -356,7 +330,6 @@ class MultiTenantSetupRunner:
             "search_fields": {"dense": self.dense_field, "bm25": self.bm25_field},
             "queries_file": self.queries_sidecar.name,
             "query_count": len(self.queries),
-            "groups": [asdict(group) for group in self.dataset.groups],
             "namespaces": [asdict(spec) for spec in specs],
             "search_order_seed": SEARCH_ORDER_SEED,
             "search_order": search_order,
@@ -382,7 +355,6 @@ class MultiTenantSetupRunner:
                 json.dumps(
                     {
                         "namespace": spec.name,
-                        "group": spec.group,
                         "state": state,
                         "inserted_rows": inserted_rows,
                     },
@@ -418,51 +390,46 @@ class MultiTenantSetupRunner:
 
         newly_inserted = 0
         with self.db.init():
-            for group in self.dataset.groups:
-                group_names = {spec.name for spec in specs if spec.group == group.key}
-                if group_names <= completed:
+            active_name = None
+            active_count = 0
+            for batch in self.dataset.iter_batches(
+                self.run_prefix,
+                self.batch_size,
+            ):
+                spec = batch.namespace
+                if spec.name in completed:
                     continue
-                active_name = None
-                active_count = 0
-                for batch in self.dataset.iter_group_batches(
-                    self.run_prefix,
-                    group,
-                    self.batch_size,
-                ):
-                    spec = batch.namespace
-                    if spec.name in completed:
-                        continue
-                    if batch.first:
-                        if states.get(spec.name) is None:
-                            if self.db.namespace_exists(spec.name):
-                                raise FileExistsError(f"refusing existing namespace without checkpoint: {spec.name}")
-                            self._append_checkpoint(spec, "started", 0)
-                            states[spec.name] = "started"
-                        self.db.select_namespace(spec.name)
-                        active_name = spec.name
-                        active_count = 0
-                    if active_name != spec.name:
-                        raise RuntimeError(f"non-contiguous batches for namespace {spec.name}")
-                    rows = batch.customized_rows(self.schema)
-                    self._insert(spec.name, rows)
-                    active_count += len(rows)
-                    if batch.last:
-                        if active_count != spec.rows:
-                            raise RuntimeError(
-                                f"namespace {spec.name} inserted {active_count} rows, expected {spec.rows}"
-                            )
-                        self._append_checkpoint(spec, "completed", active_count)
-                        states[spec.name] = "completed"
-                        completed.add(spec.name)
-                        newly_inserted += active_count
-                        active_name = None
+                if batch.first:
+                    if states.get(spec.name) is None:
+                        if self.db.namespace_exists(spec.name):
+                            raise FileExistsError(f"refusing existing namespace without checkpoint: {spec.name}")
+                        self._append_checkpoint(spec, "started", 0)
+                        states[spec.name] = "started"
+                    self.db.select_namespace(spec.name)
+                    active_name = spec.name
+                    active_count = 0
+                if active_name != spec.name:
+                    raise RuntimeError(f"non-contiguous batches for namespace {spec.name}")
+                rows = batch.customized_rows(self.schema)
+                self._insert(spec.name, rows)
+                active_count += len(rows)
+                if batch.last:
+                    if active_count != spec.rows:
+                        raise RuntimeError(
+                            f"namespace {spec.name} inserted {active_count} rows, expected {spec.rows}"
+                        )
+                    self._append_checkpoint(spec, "completed", active_count)
+                    states[spec.name] = "completed"
+                    completed.add(spec.name)
+                    newly_inserted += active_count
+                    active_name = None
         return self._summary(newly_inserted, completed, len(specs))
 
     def _summary(self, inserted_rows: int, completed: set[str], total_namespaces: int) -> dict[str, int | str]:
         return {
-            "profile": self.profile,
+            "rows_per_namespace": self.group.rows_per_namespace,
             "inserted_rows": inserted_rows,
-            "total_rows": sum(group.source_rows for group in self.dataset.groups),
+            "total_rows": self.group.source_rows,
             "completed_namespaces": len(completed),
             "total_namespaces": total_namespaces,
             "queries": len(self.queries),
@@ -483,14 +450,11 @@ class MultiTenantSearchRunner:
         manifest_path: Path,
         mode: str,
         *,
-        group: str = "all",
         output_fields: tuple[str, ...] = (),
         top_k: int = 100,
     ):
         if mode not in {"dense", "bm25"}:
             raise ValueError("multi-tenant search mode must be dense or bm25")
-        if group not in {"all", "A", "B", "C", "D"}:
-            raise ValueError("multi-tenant group must be all, A, B, C, or D")
         if top_k <= 0:
             raise ValueError("top_k must be positive")
         if len(set(output_fields)) != len(output_fields) or "id" in output_fields:
@@ -499,24 +463,22 @@ class MultiTenantSearchRunner:
         self.db = db
         self.manifest_path = manifest_path.resolve()
         self.mode = mode
-        self.group = group
         self.output_fields = output_fields
         self.top_k = top_k
         self.manifest_bytes = self.manifest_path.read_bytes()
         self.manifest = json.loads(self.manifest_bytes)
         self.manifest_hash = hashlib.sha256(self.manifest_bytes).hexdigest()
         self.event_path = self.manifest_path.with_name(f"{self.manifest_path.stem}.{mode}.search.jsonl")
-        self.summary_path = self.manifest_path.with_name(
-            f"{self.manifest_path.stem}.{mode}.{group.lower()}.summary.json"
-        )
+        self.summary_path = self.manifest_path.with_name(f"{self.manifest_path.stem}.{mode}.summary.json")
         self._validate_manifest()
 
     def _validate_manifest(self) -> None:
         if self.manifest.get("version") != MANIFEST_VERSION:
             raise ValueError(f"setup manifest must have version {MANIFEST_VERSION}")
-        self.profile = self.manifest.get("profile")
-        if not isinstance(self.profile, str):
-            raise ValueError("setup manifest must declare its namespace profile")
+        rows_per_namespace = self.manifest.get("rows_per_namespace")
+        if not isinstance(rows_per_namespace, int) or rows_per_namespace <= 0:
+            raise ValueError("setup manifest must declare positive rows_per_namespace")
+        self.rows_per_namespace = rows_per_namespace
         schema = self.manifest.get("schema", {})
         search_fields = self.manifest.get("search_fields", {})
         self.search_field = search_fields.get(self.mode)
@@ -546,11 +508,9 @@ class MultiTenantSearchRunner:
         order = self.manifest.get("search_order", [])
         if len(self.namespaces) != len(entries) or set(order) != set(self.namespaces) or len(order) != len(entries):
             raise ValueError("manifest namespaces and search order do not match")
-        self.search_order = [
-            name for name in order if self.group == "all" or self.namespaces[name]["group"] == self.group
-        ]
+        self.search_order = list(order)
         if not self.search_order:
-            raise ValueError(f"manifest contains no namespaces for group {self.group}")
+            raise ValueError("manifest declares no namespaces to search")
 
         states = _setup_checkpoint_states(self.checkpoint_path, set(self.namespaces))
         incomplete = sorted(name for name in self.namespaces if states.get(name) != "completed")
@@ -625,7 +585,15 @@ class MultiTenantSearchRunner:
     def _query_value(self, query: SearchQuery) -> Any:
         return list(query.dense) if self.mode == "dense" else query.bm25
 
-    def _query(self, namespace: str, pass_name: str, query_index: int, value: Any) -> dict[str, Any]:
+    def _query(
+        self,
+        namespace: str,
+        pass_name: str,
+        query_index: int,
+        value: Any,
+        *,
+        disable_cache: bool,
+    ) -> dict[str, Any]:
         self._append_state(namespace, pass_name, query_index, "started")
         started = time.perf_counter()
         try:
@@ -635,6 +603,7 @@ class MultiTenantSearchRunner:
                 value,
                 self.top_k,
                 self.output_fields,
+                disable_cache=disable_cache,
             )
             results = self.db.search_customized_queries([request])
             if len(results) != 1:
@@ -682,46 +651,39 @@ class MultiTenantSearchRunner:
             "p99_ms": round(float(np.percentile(ordered, 99)), 4),
         }
 
+    @staticmethod
+    def _cache_temperatures(events: list[dict[str, Any]]) -> dict[str, int]:
+        counts = Counter(event["performance"].get("cache_temperature") for event in events)
+        counts.pop(None, None)
+        return dict(sorted(counts.items()))
+
     def _summary(self, states: dict[tuple[str, str, int], dict[str, Any]]) -> dict[str, Any]:
-        groups = {}
-        for group in sorted({self.namespaces[name]["group"] for name in self.search_order}):
-            names = [name for name in self.search_order if self.namespaces[name]["group"] == group]
-            group_summary = {
-                "rows_per_namespace": self.namespaces[names[0]]["rows"],
-                "namespace_count": len(names),
+        buckets = {
+            "first": [
+                (name, "first", query.index) for name in self.search_order for query in self.queries
+            ],
+            "repeat": [
+                (name, "repeat", query.index) for name in self.search_order for query in self.queries
+            ],
+        }
+        bucket_summary = {}
+        for bucket, keys in buckets.items():
+            events = [states[key] for key in keys if key in states]
+            completed = [event for event in events if event["event"] == "completed"]
+            bucket_summary[bucket] = {
+                **self._latency_stats([event["client_latency_ms"] for event in completed]),
+                "outcomes": dict(sorted(Counter(event["event"] for event in events).items())),
+                "server_total_ms": self._latency_stats(
+                    [event["performance"].get("server_total_ms") for event in completed]
+                ),
+                "query_execution_ms": self._latency_stats(
+                    [event["performance"].get("query_execution_ms") for event in completed]
+                ),
+                "cache_temperature": self._cache_temperatures(completed),
+                "cache_hit_ratio": self._latency_stats(
+                    [event["performance"].get("cache_hit_ratio") for event in completed]
+                ),
             }
-            buckets = {
-                "cold": [(name, "first", 0) for name in names],
-                "first": [
-                    (name, "first", query.index) for name in names for query in self.queries
-                ],
-                "repeat": [
-                    (name, "repeat", query.index) for name in names for query in self.queries
-                ],
-            }
-            for bucket, keys in buckets.items():
-                events = [states[key] for key in keys if key in states]
-                group_summary[bucket] = {
-                    **self._latency_stats(
-                        [event["client_latency_ms"] for event in events if event["event"] == "completed"]
-                    ),
-                    "outcomes": dict(sorted(Counter(event["event"] for event in events).items())),
-                    "server_total_ms": self._latency_stats(
-                        [
-                            event["performance"].get("server_total_ms")
-                            for event in events
-                            if event["event"] == "completed"
-                        ]
-                    ),
-                    "query_execution_ms": self._latency_stats(
-                        [
-                            event["performance"].get("query_execution_ms")
-                            for event in events
-                            if event["event"] == "completed"
-                        ]
-                    ),
-                }
-            groups[group] = group_summary
 
         completed_namespaces = sum(
             all(
@@ -731,19 +693,27 @@ class MultiTenantSearchRunner:
             )
             for name in self.search_order
         )
+        all_completed = [
+            state
+            for state in states.values()
+            if state.get("event") == "completed" and state.get("namespace") in self.namespaces
+        ]
         summary = {
             "status": "complete" if completed_namespaces == len(self.search_order) else "incomplete",
-            "profile": self.profile,
+            "rows_per_namespace": self.rows_per_namespace,
             "mode": self.mode,
-            "group": self.group,
             "search_field": self.search_field,
             "output_fields": list(self.output_fields),
             "top_k": self.top_k,
             "query_count": len(self.queries),
-            "namespace_count": len(self.search_order),
             "total_rows": sum(self.namespaces[name]["rows"] for name in self.search_order),
             "completed_namespaces": completed_namespaces,
-            "groups": groups,
+            "cache_temperature": self._cache_temperatures(all_completed),
+            "cache_hit_ratio": self._latency_stats(
+                [event["performance"].get("cache_hit_ratio") for event in all_completed]
+            ),
+            "first": bucket_summary["first"],
+            "repeat": bucket_summary["repeat"],
             "event_path": str(self.event_path),
             "summary_path": str(self.summary_path),
         }
@@ -768,14 +738,14 @@ class MultiTenantSearchRunner:
                 for query in self.queries:
                     if (namespace, "first", query.index) not in states:
                         states[(namespace, "first", query.index)] = self._query(
-                            namespace, "first", query.index, self._query_value(query)
+                            namespace, "first", query.index, self._query_value(query), disable_cache=True
                         )
                 for query in self.queries:
                     first_state = states.get((namespace, "first", query.index))
                     if first_state and first_state["event"] == "completed":
                         if states.get((namespace, "repeat", query.index), {}).get("event") != "completed":
                             states[(namespace, "repeat", query.index)] = self._query(
-                                namespace, "repeat", query.index, self._query_value(query)
+                                namespace, "repeat", query.index, self._query_value(query), disable_cache=False
                             )
                     elif first_state and (namespace, "repeat", query.index) not in states:
                         states[(namespace, "repeat", query.index)] = self._append_state(

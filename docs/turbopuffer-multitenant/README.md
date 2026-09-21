@@ -1,45 +1,16 @@
 # Run the turbopuffer multi-tenant cold-latency case
 
-This case measures one first query and one immediate repeat query against each namespace, sequentially. It supports dense ANN and BM25 as separate operations over the same wide-row schema.
+This case measures the same 100 out-of-sample queries per namespace in two passes: pass `first` runs every query with turbopuffer's `disable_cache` flag (a genuinely cold, uncached read), then pass `repeat` runs every query again without the flag (warm). It supports dense ANN and BM25 as separate operations over the same wide-row schema.
 
-## Choose a profile
+## Choose the namespace size
 
-The profile changes only the number of namespaces. Rows per namespace remain 1K, 3K, 15K, and 5M.
+Each setup run creates exactly **one** namespace of `--multitenant-namespace-rows` rows (any positive integer up to the prepared file's 5M rows). Run setup once per size you want to compare — e.g. one 1K, one 10K, one 15K, one 5M — each with a fresh prefix and manifest, then search each.
 
-| Profile | A/B/C namespaces each | D namespaces | Total namespaces | Total rows |
-| --- | ---: | ---: | ---: | ---: |
-| `small` | 20 | 1 | 61 | 5.38M |
-| `medium` | 100 | 1 | 301 | 6.9M |
-| `large` | 300 | 1 | 901 | 10.7M |
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--multitenant-namespace-rows` | `15000` | Rows in the single namespace this setup creates |
 
-Start with `small` for the live pilot. Use `medium` for the normal comparison. Use `large` only when Medium's confidence intervals are too wide. P99 is descriptive rather than an acceptance metric because there are too few tail observations even in Large.
-
-### Skip the 5M-row namespace
-
-Add `--multitenant-exclude-5m` to the **setup** command to skip the single 5M-row D namespace. The A/B/C namespace counts are unchanged, so the profile reports as `small-no-5m`, `medium-no-5m`, or `large-no-5m`:
-
-| Profile + flag | Namespaces | Total rows |
-| --- | ---: | ---: |
-| `small` + `--multitenant-exclude-5m` | 60 | 380K |
-| `medium` + `--multitenant-exclude-5m` | 300 | 1.9M |
-| `large` + `--multitenant-exclude-5m` | 900 | 5.7M |
-
-Setup summary for the flagged Small run is `profile=small-no-5m`, `completed_namespaces=60`, `total_namespaces=60`, and `total_rows=380000`. Search commands stay unchanged and read the namespaces from the manifest; do not pass `--multitenant-group D` for a manifest created with the flag.
-
-### Shared out-of-sample query set
-
-Every namespace is measured with the same 100 out-of-sample queries: pass `first` runs all 100 (query 0 is the cold sample, queries 1-99 are the warm-up ramp), then pass `repeat` runs all 100 again while the namespace is warm. The queries come from a wide-table Parquet that was NOT used to build the prepared insert file, so no query vector exists inside any namespace.
-
-Extract them once from any unused source file (e.g. `wide_table_0010.parquet`, which is beyond the 5M rows used for inserts):
-
-```bash
-export QUERIES_FILE=/home/ubuntu/vdbbench-data-inspect/turbopuffer-queries/queries.json
-/home/ubuntu/VectorDBBench/.venv/bin/python scripts/extract_turbopuffer_multitenant_queries.py \
-  --input /home/ubuntu/vdbbench-data-inspect/turbopuffer-queries/wide_table_0010.parquet \
-  --output "$QUERIES_FILE" --count 100
-```
-
-The setup operation records the query set in the manifest (version 5) and copies it to a `<manifest>.queries.json` sidecar, so dense and BM25 search commands need no query arguments.
+The namespace is named `{run_prefix}_{rows}_0001` — the row size is part of the name, e.g. `tp_mt_dense_1000_0001`, `tp_mt_dense_15000_0001`, `tp_mt_dense_5000000_0001`.
 
 ## Prerequisites
 
@@ -82,11 +53,11 @@ cd "$VDBBENCH_WORKDIR"
 Choose a unique prefix and manifest. Never reuse a prefix that may already exist in turbopuffer.
 
 ```bash
-export DENSE_PREFIX=tp_mt_dense_small_20260916
-export DENSE_MANIFEST="$MULTITENANT_RUN_DIR/dense-small.json"
+export DENSE_PREFIX=tp_mt_dense_20260918
+export DENSE_MANIFEST="$MULTITENANT_RUN_DIR/dense.json"
 ```
 
-Create the Small profile:
+Create the namespaces:
 
 ```bash
 PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
@@ -94,18 +65,16 @@ PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
   --region "$TURBOPUFFER_REGION" \
   --case-type TurboPufferMultiTenantColdStart \
   --multitenant-operation setup \
-  --multitenant-profile small \
   --multitenant-manifest "$DENSE_MANIFEST" \
   --multitenant-prepared-data "$MULTITENANT_DATA" \
   --multitenant-queries-file "$QUERIES_FILE" \
-  --multitenant-run-prefix "$DENSE_PREFIX"
+  --multitenant-run-prefix "$DENSE_PREFIX" \
+  --multitenant-namespace-rows 15000
 ```
 
-Add `--multitenant-exclude-5m` to skip the 5M-row D namespace for a cheaper pilot.
+Expected setup summary values: `rows_per_namespace=15000`, `completed_namespaces=1`, `total_namespaces=1`, `total_rows=15000`, and `queries=100`. Setup does not issue measured search queries.
 
-Expected setup summary values for Small without the flag are `profile=small`, `completed_namespaces=61`, `total_namespaces=61`, `total_rows=5380000`, and `queries=100`; with `--multitenant-exclude-5m` they are `profile=small-no-5m`, `completed_namespaces=60`, `total_rows=380000`. Setup does not issue measured search queries.
-
-Run dense measurements across every group. Each namespace is queried with all 100 queries in pass `first`, then all 100 again in pass `repeat`:
+Run dense measurements across every namespace. Each namespace is queried with all 100 queries in pass `first` (each with `disable_cache: true`), then all 100 again in pass `repeat` (no flag):
 
 ```bash
 PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
@@ -114,46 +83,29 @@ PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
   --case-type TurboPufferMultiTenantColdStart \
   --multitenant-operation dense \
   --multitenant-manifest "$DENSE_MANIFEST" \
-  --multitenant-group all \
   --k 100
 ```
 
-Expected search summary values are `status=complete`, `profile=small`, `query_count=100`, `namespace_count=61`, and `completed_namespaces=61`. The per-group summary reports three buckets per distribution — `cold` (query 0 of pass `first`, one genuinely-cold sample per namespace), `first` (the full cold pass: all 100 queries), and `repeat` (the warm pass: all 100 queries) — each with client/server latency min/max/average/P50/P95/P99 and outcome counts. Only query 0 of pass `first` is truly cold; the remaining 99 first-pass queries and all repeat queries run against the warmed namespace, so the cold signal appears in the `cold` bucket and in the `first` bucket's max/P99 rather than its P50.
-
-To limit one invocation's runtime, select one group instead:
-
-```bash
-# Replace A with B, C, or D for later invocations.
-PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
-  --api-key "$TURBOPUFFER_API_KEY" \
-  --region "$TURBOPUFFER_REGION" \
-  --case-type TurboPufferMultiTenantColdStart \
-  --multitenant-operation dense \
-  --multitenant-manifest "$DENSE_MANIFEST" \
-  --multitenant-group A \
-  --k 100
-```
-
-All group invocations share the same dense JSONL checkpoint. A later `--multitenant-group all` invocation skips completed namespaces and processes only the remainder.
+Expected search summary values are `status=complete`, `rows_per_namespace=15000`, `query_count=100`, and `completed_namespaces=1`. The summary reports two buckets — `first` (the cold pass: all 100 queries per namespace, sent with `disable_cache: true`) and `repeat` (the warm pass: all 100 queries per namespace, no flag) — each with client/server latency min/max/average/P50/P95/P99, outcome counts, and cache metrics (`cache_temperature` counts and `cache_hit_ratio` stats); a top-level `cache_temperature`/`cache_hit_ratio` aggregate covers all queries. Per the task policy, cache cold/warmness is classified strictly from turbopuffer's reported `cache_temperature`/`cache_hit_ratio`; latency metrics are recorded but never used to label cache state. With the flag, pass `first` reports `cold`/`0.0` and pass `repeat` reports `hot`/`1.0`.
 
 ## BM25 run
 
-BM25 needs a fresh prefix and manifest if its first query is to be treated as cold. A dense query may already have changed the namespace cache state.
+BM25 needs a fresh prefix and manifest (the runner enforces separate setup manifests per mode):
 
 ```bash
-export BM25_PREFIX=tp_mt_bm25_small_20260916
-export BM25_MANIFEST="$MULTITENANT_RUN_DIR/bm25-small.json"
+export BM25_PREFIX=tp_mt_bm25_20260918
+export BM25_MANIFEST="$MULTITENANT_RUN_DIR/bm25.json"
 
 PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
   --api-key "$TURBOPUFFER_API_KEY" \
   --region "$TURBOPUFFER_REGION" \
   --case-type TurboPufferMultiTenantColdStart \
   --multitenant-operation setup \
-  --multitenant-profile small \
   --multitenant-manifest "$BM25_MANIFEST" \
   --multitenant-prepared-data "$MULTITENANT_DATA" \
   --multitenant-queries-file "$QUERIES_FILE" \
-  --multitenant-run-prefix "$BM25_PREFIX"
+  --multitenant-run-prefix "$BM25_PREFIX" \
+  --multitenant-namespace-rows 15000
 
 PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
   --api-key "$TURBOPUFFER_API_KEY" \
@@ -161,11 +113,10 @@ PYTHONPATH="$VDBBENCH_WORKDIR" "$VDBBENCH_BIN" turbopuffer \
   --case-type TurboPufferMultiTenantColdStart \
   --multitenant-operation bm25 \
   --multitenant-manifest "$BM25_MANIFEST" \
-  --multitenant-group all \
   --k 100
 ```
 
-Expected BM25 search summary values are `status=complete`, `profile=small`, and `search_field=content`.
+Expected BM25 search summary values are `status=complete`, `rows_per_namespace=15000`, and `search_field=content`. For a multi-size comparison, repeat setup + search for each size with a fresh prefix and manifest.
 
 ## Search fields and returned attributes
 
@@ -193,28 +144,26 @@ VDBBench validates the returned columns and counts, then discards their values. 
 
 ## Artifacts
 
-For `dense-small.json`, setup creates:
+For `dense.json`, setup creates:
 
 ```text
-dense-small.json
-dense-small.checkpoints.jsonl
-dense-small.queries.json
+dense.json
+dense.checkpoints.jsonl
+dense.queries.json
 ```
 
 Dense search creates:
 
 ```text
-dense-small.dense.search.jsonl
-dense-small.dense.all.summary.json
+dense.dense.search.jsonl
+dense.dense.summary.json
 ```
 
-A group-specific run writes a summary such as `dense-small.dense.a.summary.json` while sharing `dense-small.dense.search.jsonl`.
+The summary separates `first` (the cold pass, `disable_cache: true`) and `repeat` (the warm pass) results across all namespaces. Each bucket contains outcomes plus client, server-total, and query-execution min/max/average/P50/P95/P99, `cache_temperature` counts, and `cache_hit_ratio` stats.
 
-The summary separates `cold` (query 0 of pass `first`, one sample per namespace), `first` (the full cold pass), and `repeat` (the warm pass) results for every namespace-size group. Each bucket contains outcomes plus client, server-total, and query-execution min/max/average/P50/P95/P99.
+## Cold-warm semantics
 
-## Cold-wait note
-
-Turbopuffer has no cache-eviction API (`hint_cache_warm` and namespace pinning only warm). A namespace is `cold` only after the service evicts it from cache while idle, so wait after setup before searching — otherwise the "cold" query is already `hot` (as the first pilot observed). Every event records the backend-reported `cache_temperature`/`cache_hit_ratio`; verify the `cold` bucket's query-0 events report `cold` before trusting the cold latencies, and extend the idle wait if they are `hot`.
+Turbopuffer honors an undocumented per-query `disable_cache` request-body flag (verified 2026-09-18 for this account; see the task tracker). Pass `first` sends it, so every first-pass query is a genuinely cold, uncached read reported as `cache_temperature="cold"` / `cache_hit_ratio=0.0`; pass `repeat` omits it and runs warm (`hot`/`1.0`). No idle-eviction wait is needed, and `hint_cache_warm`/namespace pinning are not used by this case. Per the task policy (AGENTS.md), turbopuffer's `cache_temperature`/`cache_hit_ratio` are the SOLE indicators of cache cold/warmness; latency metrics are recorded but never used to classify cache state.
 
 ## Resume and failure behavior
 
@@ -222,4 +171,4 @@ Repeat the exact setup command to resume setup. The manifest must match the prof
 
 Repeat the exact search command to resume search. A recorded `started` event without a terminal event becomes `indeterminate` and is never rerun. If a first-pass query failed or became indeterminate, its repeat is marked `skipped`. Other namespaces and other queries continue, and an incomplete invocation still writes its summary before reporting failure.
 
-Measured queries have no benchmark-level or SDK-level retries. The case never deletes namespaces automatically; use a new unique prefix for another cold run and clean up old namespaces separately after reviewing the artifacts.
+Measured queries have no benchmark-level or SDK-level retries. The case never deletes namespaces automatically; use a new unique prefix for another run and clean up old namespaces separately after reviewing the artifacts.

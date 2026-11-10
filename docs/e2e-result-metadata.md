@@ -56,6 +56,19 @@ the events share a `reload_id`. A failed or timed-out release or load fails the
 case. This explicit reload changes the workload and does not guarantee a cold
 cache. With the option absent, the existing refresh-load behavior is retained.
 
+With `E2E_COLD_HOT_SEARCH=1` as well, a Milvus or Zilliz Cloud performance case
+requires stage events, collection reload, ground truth, `nq=1`, and concurrent
+search configured for exactly 100 workers and 60 seconds. It runs the same
+serial query set twice, before concurrent search. The first pass is `cold` (the
+first pass after reload, not a guarantee of an empty cache); the second is
+`hot`. Each emits its own `search_serial_cold` or `search_serial_hot` span.
+The native metric's `additional_parameters.e2e_serial_search` contains `cold`
+and `hot` objects with `span_id`, `query_count`, `recall`,
+`average_latency_seconds` and `maximum_latency_seconds`. Latencies are measured
+per client request, including retries; recall is a fraction, not a percentage.
+The legacy scalar serial fields describe the second pass in this mode. Existing
+case behavior and result structure are otherwise unchanged.
+
 With events enabled, each compaction also samples persistent segment counts just
 before and just after the compaction span. The `segments` observation and native
 `compaction_segments` metric retain both timestamps and mark an unavailable

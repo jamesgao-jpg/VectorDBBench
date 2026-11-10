@@ -154,6 +154,7 @@ class SerialSearchRunner:
         self.payload_profile = payload_profile
         self.tenant_labels = tenant_labels or []
         self.measure_recall = measure_recall
+        self.e2e_serial_details = False
         if workload_kind == WorkloadKind.FULL_TEXT:
             self._search_func = self.db.search_documents
             self._use_fts_metrics = True
@@ -327,7 +328,11 @@ class SerialSearchRunner:
             f"p50={p50}, "
             f"recall_at={avg_recall_at}"
         )
-        return (avg_recall, avg_ndcg, p99, p95, p50, avg_recall_at)
+        result = (avg_recall, avg_ndcg, p99, p95, p50, avg_recall_at)
+        if self.e2e_serial_details:
+            return (*result, {"average_latency_seconds": float(np.mean(latencies)),
+                              "maximum_latency_seconds": max(latencies), "query_count": len(latencies)})
+        return result
 
     def _run_in_subprocess(self) -> tuple[float, ...]:
         with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:

@@ -1,6 +1,7 @@
 import concurrent
 import hashlib
 import logging
+import os
 import re
 import time
 import traceback
@@ -26,11 +27,12 @@ from .runner import (
     SerialInsertRunner,
     SerialSearchRunner,
 )
-from .stage_events import stage
+from .stage_events import enabled as stage_events_enabled, stage
 from .utils import kill_proc_tree
 from .workload import WorkloadKind
 
 log = logging.getLogger(__name__)
+E2E_SEARCH_CONTRACT = 1
 # Milvus and Zilliz Cloud cap topK at this value unless the collection opts into Large TopK mode.
 MILVUS_DEFAULT_TOPK_LIMIT = 16_384
 LARGE_TOPK_QUERY_MODE_DBS = frozenset({DB.Milvus, DB.ZillizCloud})
@@ -386,6 +388,11 @@ class CaseRunner(BaseModel):
 
         log.info("Start performance case")
         try:
+            required_stages = {TaskStage.LOAD, TaskStage.SEARCH_SERIAL, TaskStage.SEARCH_CONCURRENT}
+            if os.environ.get("E2E_COLD_HOT_SEARCH") == "1" and (
+                not drop_old or not required_stages.issubset(self.config.stages)
+            ):
+                raise ValueError("E2E cold/hot search requires a fresh collection and both search stages")
             m = Metric()
             if self.is_fts and getattr(self.ca.dataset, "filter_stats", None):
                 m.additional_parameters["fts_filter"] = dict(self.ca.dataset.filter_stats)
@@ -419,37 +426,40 @@ class CaseRunner(BaseModel):
                     log.info("Data loading skipped")
             if TaskStage.SEARCH_SERIAL in self.config.stages or TaskStage.SEARCH_CONCURRENT in self.config.stages:
                 self._init_search_runners()
-                if TaskStage.SEARCH_CONCURRENT in self.config.stages:
-                    search_results = self._conc_search()
-                    (
-                        m.qps,
-                        m.conc_num_list,
-                        m.conc_qps_list,
-                        m.conc_latency_p99_list,
-                        m.conc_latency_p95_list,
-                        m.conc_latency_avg_list,
-                        m.conc_latency_p50_list,
-                    ) = search_results
-                if TaskStage.SEARCH_SERIAL in self.config.stages:
-                    cooldown = self.config.case_config.concurrency_search_config.serial_cooldown
-                    if TaskStage.SEARCH_CONCURRENT in self.config.stages and cooldown > 0:
-                        log.info(
-                            f"Cooldown {cooldown}s before serial search to ensure a stable measurement environment"
-                        )
-                        time.sleep(cooldown)
-                    with stage("search_serial"):
-                        search_results = self._serial_search()
-                    if self.is_fts:
-                        m.recall, m.ndcg, m.mrr, m.serial_latency_p99, m.serial_latency_p95 = search_results
-                    else:
+                if os.environ.get("E2E_COLD_HOT_SEARCH") == "1":
+                    self._run_e2e_search(m)
+                else:
+                    if TaskStage.SEARCH_CONCURRENT in self.config.stages:
+                        search_results = self._conc_search()
                         (
-                            m.recall,
-                            m.ndcg,
-                            m.serial_latency_p99,
-                            m.serial_latency_p95,
-                            m.serial_latency_p50,
-                            m.recall_at,
+                            m.qps,
+                            m.conc_num_list,
+                            m.conc_qps_list,
+                            m.conc_latency_p99_list,
+                            m.conc_latency_p95_list,
+                            m.conc_latency_avg_list,
+                            m.conc_latency_p50_list,
                         ) = search_results
+                    if TaskStage.SEARCH_SERIAL in self.config.stages:
+                        cooldown = self.config.case_config.concurrency_search_config.serial_cooldown
+                        if TaskStage.SEARCH_CONCURRENT in self.config.stages and cooldown > 0:
+                            log.info(
+                                f"Cooldown {cooldown}s before serial search to ensure a stable measurement environment"
+                            )
+                            time.sleep(cooldown)
+                        with stage("search_serial"):
+                            search_results = self._serial_search()
+                        if self.is_fts:
+                            m.recall, m.ndcg, m.mrr, m.serial_latency_p99, m.serial_latency_p95 = search_results
+                        else:
+                            (
+                                m.recall,
+                                m.ndcg,
+                                m.serial_latency_p99,
+                                m.serial_latency_p95,
+                                m.serial_latency_p50,
+                                m.recall_at,
+                            ) = search_results
             gt_data = getattr(self.ca.dataset, "gt_data", None)
             if gt_data is not None and hasattr(gt_data, "path"):
                 m.additional_parameters["ground_truth"] = {
@@ -606,6 +616,35 @@ class CaseRunner(BaseModel):
             raise e from None
         finally:
             runner = None
+
+    def _run_e2e_search(self, metric: Metric):
+        search_config = self.config.case_config.concurrency_search_config
+        runner = self.serial_search_runner
+        if (
+            self.is_fts or self.config.db not in {DB.Milvus, DB.ZillizCloud}
+            or os.environ.get("E2E_COLLECTION_RELOAD") != "1" or not stage_events_enabled()
+            or TaskStage.LOAD not in self.config.stages or TaskStage.SEARCH_SERIAL not in self.config.stages
+            or TaskStage.SEARCH_CONCURRENT not in self.config.stages
+            or search_config.num_concurrency != [100] or search_config.concurrency_duration != 60
+            or self.config.case_config.nq != 1
+            or runner is None or not runner.measure_recall or runner.ground_truth is None
+        ):
+            raise ValueError("E2E cold/hot search requires reload, events, ground truth, nq=1 and concurrency 100 for 60s")
+        observations = {}
+        runner.e2e_serial_details = True
+        try:
+            for name in ("cold", "hot"):
+                with stage("search_serial_" + name) as span_id:
+                    result = self._serial_search()
+                *native, details = result
+                observations[name] = {**details, "recall": native[0], "span_id": span_id}
+            (metric.recall, metric.ndcg, metric.serial_latency_p99, metric.serial_latency_p95,
+             metric.serial_latency_p50, metric.recall_at) = native
+        finally:
+            runner.e2e_serial_details = False
+        metric.additional_parameters["e2e_serial_search"] = observations
+        (metric.qps, metric.conc_num_list, metric.conc_qps_list, metric.conc_latency_p99_list,
+         metric.conc_latency_p95_list, metric.conc_latency_avg_list, metric.conc_latency_p50_list) = self._conc_search()
 
     def _serial_search(self) -> tuple[float, ...]:
         """Performance serial tests, search the entire test data once,

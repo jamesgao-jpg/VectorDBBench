@@ -58,16 +58,18 @@ cache. With the option absent, the existing refresh-load behavior is retained.
 
 With `E2E_COLD_HOT_SEARCH=1` as well, a Milvus or Zilliz Cloud performance case
 requires stage events, collection reload, ground truth, `nq=1`, and concurrent
-search configured for exactly 100 workers and 60 seconds. It runs the same
-serial query set twice, before concurrent search. The first pass is `cold` (the
-first pass after reload, not a guarantee of an empty cache); the second is
-`hot`. Each emits its own `search_serial_cold` or `search_serial_hot` span.
-The native metric's `additional_parameters.e2e_serial_search` contains `cold`
-and `hot` objects with `span_id`, `query_count`, `recall`,
-`average_latency_seconds` and `maximum_latency_seconds`. Latencies are measured
-per client request, including retries; recall is a fraction, not a percentage.
-The legacy scalar serial fields describe the second pass in this mode. Existing
-case behavior and result structure are otherwise unchanged.
+search configured for exactly 100 workers and 60 seconds. Search contract 2
+cycles through the original query vectors for at least 20 seconds in the
+`search_serial_cold` span. The `search_serial_hot` span replays the exact cold
+sequence for at least 20 seconds, completing its final replay. Cold means the
+first pass after reload, not a guarantee of an empty cache. Each result in
+`additional_parameters.e2e_serial_search` records the span, actual duration,
+query count and client-observed mean and maximum latency in seconds. Latencies
+include retries. A separate `search_recall` span evaluates the original queries
+and ground truth; `additional_parameters.e2e_recall` records its span, query
+count, K and recall as a fraction. The legacy scalar recall and serial latency
+fields describe that recall pass. Existing case behavior is unchanged when the
+option is absent.
 
 With events enabled, each compaction also samples persistent segment counts just
 before and just after the compaction span. The `segments` observation and native

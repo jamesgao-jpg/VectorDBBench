@@ -281,6 +281,46 @@ def test_existing_serial_result_shape_is_unchanged():
     assert len(runner.search((runner.test_data, runner.ground_truth))) == 6
 
 
+def test_timed_serial_replays_full_cold_sequence_without_recall(monkeypatch):
+    from vectordb_bench.backend.runner.serial_runner import SerialSearchRunner
+
+    db = MagicMock()
+    db.name = "Milvus"
+    db.supports_payload_profile.return_value = True
+    db.init.return_value = nullcontext()
+    clock = [0.0]
+    step = [0.6]
+    def search(_query, _k):
+        clock[0] += step[0]
+        return [0]
+    db.search_embedding.side_effect = search
+    monkeypatch.setattr("vectordb_bench.backend.runner.serial_runner.time.perf_counter", lambda: clock[0])
+    runner = SerialSearchRunner(db=db, test_data=[[1.0], [2.0], [3.0]], ground_truth=[[0]] * 3, k=1)
+    cold = runner.timed_search(2)
+    cold_queries = [call.args[0] for call in db.search_embedding.call_args_list]
+    assert cold["query_count"] == 4
+    assert cold["duration_seconds"] >= 2
+    assert cold["average_latency_seconds"] == pytest.approx(0.6)
+    db.search_embedding.reset_mock()
+    step[0] = 0.3
+    warm = runner.timed_search(2, cold["query_count"])
+    warm_queries = [call.args[0] for call in db.search_embedding.call_args_list]
+    assert warm["query_count"] % cold["query_count"] == 0
+    assert warm["query_count"] == 8
+    assert warm_queries == cold_queries * (warm["query_count"] // cold["query_count"])
+
+
+def test_timed_serial_crosses_worker_process():
+    from vectordb_bench.backend.runner.serial_runner import SerialSearchRunner
+
+    runner = SerialSearchRunner(db=SerialEventDatabase(), test_data=[[1.0], [2.0]], ground_truth=[[0], [0]], k=1)
+    cold = runner.run_timed(0.01)
+    warm = runner.run_timed(0.01, cold["query_count"])
+    assert cold["duration_seconds"] >= 0.01
+    assert warm["duration_seconds"] >= 0.01
+    assert warm["query_count"] % cold["query_count"] == 0
+
+
 def test_e2e_search_runs_serial_cold_then_hot_then_concurrency(monkeypatch, capfd):
     from vectordb_bench.metric import Metric
     from vectordb_bench.models import TaskStage
@@ -288,31 +328,35 @@ def test_e2e_search_runs_serial_cold_then_hot_then_concurrency(monkeypatch, capf
     monkeypatch.setenv("E2E_STAGE_EVENTS", "1")
     monkeypatch.setenv("E2E_COLLECTION_RELOAD", "1")
     search = SimpleNamespace(num_concurrency=[100], concurrency_duration=60)
-    serial = SimpleNamespace(e2e_serial_details=False, measure_recall=True, ground_truth=[[0]])
+    serial = SimpleNamespace(measure_recall=True, ground_truth=[[0]], test_data=[[1.0]], k=1, _validate_ground_truth=MagicMock())
     runner = CaseRunner.model_construct(config=SimpleNamespace(db=DB.ZillizCloud,
         stages=[TaskStage.LOAD, TaskStage.SEARCH_SERIAL, TaskStage.SEARCH_CONCURRENT],
         case_config=SimpleNamespace(concurrency_search_config=search, nq=1)), ca=SimpleNamespace(label=None),
         serial_search_runner=serial)
     order = []
+    def timed(duration, replay_count):
+        order.append(("timed", duration, replay_count))
+        return {"maximum_latency_seconds": 0.5, "average_latency_seconds": 0.2, "duration_seconds": 20.0, "query_count": 1}
+    serial.run_timed = timed
     def serial_search(_runner):
-        order.append("serial")
-        return (0.95, 0.9, 0.3, 0.2, 0.1, {},
-                {"maximum_latency_seconds": 0.5, "average_latency_seconds": 0.2, "query_count": 1})
+        order.append("recall")
+        return (0.95, 0.9, 0.3, 0.2, 0.1, {})
     def concurrent_search(_runner):
         order.append("concurrent")
         return (20.0, [100], [20.0], [0.1], [0.1], [0.1], [0.1])
     with patch.object(CaseRunner, "_serial_search", serial_search), patch.object(CaseRunner, "_conc_search", concurrent_search):
         metric = Metric()
         runner._run_e2e_search(metric)
-    assert order == ["serial", "serial", "concurrent"]
+    assert order == [("timed", 20, None), ("timed", 20, 1), "recall", "concurrent"]
     assert metric.conc_num_list == [100]
-    assert metric.additional_parameters["e2e_serial_search"]["cold"]["recall"] == 0.95
+    assert metric.additional_parameters["e2e_recall"]["recall"] == 0.95
     events = records(capfd.readouterr().out)
     assert [(event["stage"], event["state"]) for event in events] == [
         ("search_serial_cold", "start"), ("search_serial_cold", "end"),
-        ("search_serial_hot", "start"), ("search_serial_hot", "end")]
+        ("search_serial_hot", "start"), ("search_serial_hot", "end"),
+        ("search_recall", "start"), ("search_recall", "end")]
     assert metric.additional_parameters["e2e_serial_search"]["hot"]["span_id"] == events[2]["span_id"]
-    assert serial.e2e_serial_details is False
+    assert metric.additional_parameters["e2e_recall"]["span_id"] == events[4]["span_id"]
 
 
 def test_e2e_search_rejects_missing_ground_truth(monkeypatch):
@@ -330,6 +374,24 @@ def test_e2e_search_rejects_missing_ground_truth(monkeypatch):
         runner._run_e2e_search(Metric())
 
 
+def test_e2e_search_rejects_mismatched_ground_truth_before_timing(monkeypatch, capfd):
+    from vectordb_bench.backend.runner.serial_runner import SerialSearchRunner
+    from vectordb_bench.metric import Metric
+    from vectordb_bench.models import TaskStage
+
+    monkeypatch.setenv("E2E_STAGE_EVENTS", "1")
+    monkeypatch.setenv("E2E_COLLECTION_RELOAD", "1")
+    search = SimpleNamespace(num_concurrency=[100], concurrency_duration=60)
+    serial = SerialSearchRunner(db=SerialEventDatabase(), test_data=[[1.0], [2.0]], ground_truth=[[0]], k=1)
+    runner = CaseRunner.model_construct(config=SimpleNamespace(db=DB.ZillizCloud,
+        stages=[TaskStage.LOAD, TaskStage.SEARCH_SERIAL, TaskStage.SEARCH_CONCURRENT],
+        case_config=SimpleNamespace(concurrency_search_config=search, nq=1)), ca=SimpleNamespace(label=None),
+        serial_search_runner=serial)
+    with pytest.raises(ValueError, match="does not match ground truth"):
+        runner._run_e2e_search(Metric())
+    assert records(capfd.readouterr().out) == []
+
+
 def test_performance_case_runs_reload_before_serial_and_concurrent(monkeypatch, capfd):
     from dataclasses import asdict
 
@@ -339,7 +401,7 @@ def test_performance_case_runs_reload_before_serial_and_concurrent(monkeypatch, 
     monkeypatch.setenv("E2E_COLLECTION_RELOAD", "1")
     monkeypatch.setenv("E2E_COLD_HOT_SEARCH", "1")
     search = SimpleNamespace(num_concurrency=[100], concurrency_duration=60)
-    serial = SimpleNamespace(e2e_serial_details=False, measure_recall=True, ground_truth=[[0]])
+    serial = SimpleNamespace(measure_recall=True, ground_truth=[[0]], test_data=[[1.0]], k=1, _validate_ground_truth=MagicMock())
     cfg = SimpleNamespace(db=DB.ZillizCloud, stages=[TaskStage.LOAD, TaskStage.SEARCH_SERIAL, TaskStage.SEARCH_CONCURRENT],
                           case_config=SimpleNamespace(concurrency_search_config=search, nq=1),
                           insert_batch_size=100, load_concurrency=1)
@@ -352,10 +414,13 @@ def test_performance_case_runs_reload_before_serial_and_concurrent(monkeypatch, 
     def optimize(_runner):
         order.append("reload")
         return 2.0
+    def timed(_duration, _replay_count):
+        order.append("timed")
+        return {"maximum_latency_seconds": .5, "average_latency_seconds": .2, "duration_seconds": 20., "query_count": 1}
+    serial.run_timed = timed
     def serial_search(_runner):
-        order.append("serial")
-        return (1., 1., .3, .2, .1, {},
-                {"maximum_latency_seconds": .5, "average_latency_seconds": .2, "query_count": 1})
+        order.append("recall")
+        return (1., 1., .3, .2, .1, {})
     def concurrent_search(_runner):
         order.append("concurrent")
         return (20., [100], [20.], [.1], [.1], [.1], [.1])
@@ -363,12 +428,12 @@ def test_performance_case_runs_reload_before_serial_and_concurrent(monkeypatch, 
           patch.object(CaseRunner, "_init_search_runners"), patch.object(CaseRunner, "_serial_search", serial_search),
           patch.object(CaseRunner, "_conc_search", concurrent_search)):
         result = runner._run_perf_case()
-    assert order == ["insert", "reload", "serial", "serial", "concurrent"]
+    assert order == ["insert", "reload", "timed", "timed", "recall", "concurrent"]
     assert result.additional_parameters["e2e_serial_search"]["cold"]["query_count"] == 1
     decoded = json.loads(json.dumps(asdict(result)))
-    assert decoded["additional_parameters"]["e2e_serial_search"]["hot"]["recall"] == 1.0
+    assert decoded["additional_parameters"]["e2e_recall"]["recall"] == 1.0
     assert [event["stage"] for event in records(capfd.readouterr().out) if event["state"] == "start"] == [
-        "insert", "search_serial_cold", "search_serial_hot"]
+        "insert", "search_serial_cold", "search_serial_hot", "search_recall"]
 
 
 def test_e2e_search_rejects_missing_stages_before_loading(monkeypatch):

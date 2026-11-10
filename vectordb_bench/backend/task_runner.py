@@ -32,7 +32,7 @@ from .utils import kill_proc_tree
 from .workload import WorkloadKind
 
 log = logging.getLogger(__name__)
-E2E_SEARCH_CONTRACT = 1
+E2E_SEARCH_CONTRACT = 2
 # Milvus and Zilliz Cloud cap topK at this value unless the collection opts into Large TopK mode.
 MILVUS_DEFAULT_TOPK_LIMIT = 16_384
 LARGE_TOPK_QUERY_MODE_DBS = frozenset({DB.Milvus, DB.ZillizCloud})
@@ -630,19 +630,21 @@ class CaseRunner(BaseModel):
             or runner is None or not runner.measure_recall or runner.ground_truth is None
         ):
             raise ValueError("E2E cold/hot search requires reload, events, ground truth, nq=1 and concurrency 100 for 60s")
-        observations = {}
-        runner.e2e_serial_details = True
-        try:
-            for name in ("cold", "hot"):
-                with stage("search_serial_" + name) as span_id:
-                    result = self._serial_search()
-                *native, details = result
-                observations[name] = {**details, "recall": native[0], "span_id": span_id}
-            (metric.recall, metric.ndcg, metric.serial_latency_p99, metric.serial_latency_p95,
-             metric.serial_latency_p50, metric.recall_at) = native
-        finally:
-            runner.e2e_serial_details = False
+        runner._validate_ground_truth(runner.test_data, runner.ground_truth)
+        observations = {"contract_version": E2E_SEARCH_CONTRACT, "minimum_duration_seconds": 20,
+                        "query_order": "dataset_order_cycle", "query_set_size": len(runner.test_data)}
+        for name in ("cold", "hot"):
+            with stage("search_serial_" + name) as span_id:
+                replay_count = observations["cold"]["query_count"] if name == "hot" else None
+                details = runner.run_timed(20, replay_count)
+            observations[name] = {**details, "span_id": span_id}
         metric.additional_parameters["e2e_serial_search"] = observations
+        with stage("search_recall") as recall_span:
+            native = self._serial_search()
+        (metric.recall, metric.ndcg, metric.serial_latency_p99, metric.serial_latency_p95,
+         metric.serial_latency_p50, metric.recall_at) = native
+        metric.additional_parameters["e2e_recall"] = {"span_id": recall_span, "recall": metric.recall,
+                                                       "query_count": len(runner.test_data), "k": runner.k}
         (metric.qps, metric.conc_num_list, metric.conc_qps_list, metric.conc_latency_p99_list,
          metric.conc_latency_p95_list, metric.conc_latency_avg_list, metric.conc_latency_p50_list) = self._conc_search()
 

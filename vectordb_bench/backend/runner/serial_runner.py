@@ -339,6 +339,36 @@ class SerialSearchRunner:
             future = executor.submit(self.search, (self.test_data, self.ground_truth))
             return future.result()
 
+    def timed_search(self, duration: float, replay_count: int | None = None) -> dict:
+        """Measure serial client latency over an ordered, cyclic query sequence."""
+        if self.test_data is None or len(self.test_data) == 0 or duration <= 0 or (replay_count is not None and replay_count <= 0):
+            raise ValueError("Timed search requires queries, a positive duration and a positive replay count")
+        count, total, maximum = 0, 0.0, 0.0
+        tenant_rng = random.Random(0)
+        with self.db.init():
+            self.db.prepare_filter(self.filters)
+            started = time.perf_counter()
+            deadline = started + duration
+            while count == 0 or time.perf_counter() < deadline or (replay_count is not None and count % replay_count):
+                if replay_count is not None and count % replay_count == 0:
+                    tenant_rng = random.Random(0)
+                position = count if replay_count is None else count % replay_count
+                query = self.test_data[position % len(self.test_data)]
+                tenant = self.tenant_labels[tenant_rng.randrange(len(self.tenant_labels))] if self.tenant_labels else None
+                query_started = time.perf_counter()
+                self._get_db_search_res(query, tenant=tenant)
+                latency = time.perf_counter() - query_started
+                count += 1
+                total += latency
+                maximum = max(maximum, latency)
+            elapsed = time.perf_counter() - started
+        return {"query_count": count, "duration_seconds": elapsed,
+                "average_latency_seconds": total / count, "maximum_latency_seconds": maximum}
+
+    def run_timed(self, duration: float, replay_count: int | None = None) -> dict:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
+            return executor.submit(self.timed_search, duration, replay_count).result()
+
     @utils.time_it
     def run(self) -> tuple[float, ...]:
         log.info(f"{mp.current_process().name:14} start serial search")
